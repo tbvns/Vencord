@@ -149,82 +149,86 @@ ${myKeys!.publicKey}${signature}`;
 }
 
 export async function handleIncomingMessage(msg: any) {
-  const content = msg.content ?? "";
-  const userId = msg.author?.id;
-  const username = msg.author?.username ?? "Unknown";
+    const content = msg.content ?? "";
+    const userId = msg.author?.id;
+    const username = msg.author?.username ?? "Unknown";
+    const messageId = msg.id; // Get the message ID
 
-  // Handle disable encryption
-  if (content.endsWith(PROTOCOL_DISABLE_SIGNATURE)) {
-    console.log(`[Disencrypt] Received encryption disable from ${username}`);
-    if (userId) {
-      await disableUserEncryption(userId);
-      showNotification({
-        title: "Disencrypt",
-        body: `🔓 ${username} disabled encryption`,
-      });
-    }
-    return;
-  }
-
-  // Handle encryption request
-  if (content.endsWith(PROTOCOL_REQUEST_SIGNATURE)) {
-    console.log(`[Disencrypt] Received encryption request from ${username}`);
-    const publicKeyMatch = content.match(/-----BEGIN PGP PUBLIC KEY BLOCK-----([\s\S]*?)-----END PGP PUBLIC KEY BLOCK-----/);
-    if (publicKeyMatch && userId) {
-      const publicKey = publicKeyMatch[0];
-      await saveUserKey(userId, publicKey);
-
-      // Send acceptance message
-      await sendProtocolMessage(msg.channel_id, 'accept');
-
-      showNotification({
-        title: "Disencrypt",
-        body: `🔐 Encryption enabled with ${username}`,
-      });
-    }
-    return;
-  }
-
-  // Handle encryption acceptance
-  if (content.endsWith(PROTOCOL_ACCEPT_SIGNATURE)) {
-    console.log(`[Disencrypt] Received encryption acceptance from ${username}`);
-    const publicKeyMatch = content.match(/-----BEGIN PGP PUBLIC KEY BLOCK-----([\s\S]*?)-----END PGP PUBLIC KEY BLOCK-----/);
-    if (publicKeyMatch && userId) {
-      const publicKey = publicKeyMatch[0];
-      await saveUserKey(userId, publicKey);
-
-      showNotification({
-        title: "Disencrypt",
-        body: `✅ ${username} accepted encryption!`,
-      });
-    }
-    return;
-  }
-
-  // Handle regular plugin detection
-  if (content.endsWith(PLUGIN_SIGNATURE)) {
-    console.log(`[Disencrypt] ${username} is using Disencrypt plugin!`);
-
-    if (userId) {
-      const existingPref = await getUserPreference(userId);
-      if (existingPref === undefined) {
-        console.log(`[Disencrypt] New user ${username}, showing notification`);
-        await showEncryptionDialog(username, userId);
-      }
+    // Handle disable encryption
+    if (content.endsWith(PROTOCOL_DISABLE_SIGNATURE)) {
+        console.log(`[Disencrypt] Received encryption disable from ${username}`);
+        if (userId) {
+            await disableUserEncryption(userId);
+            showNotification({
+                title: "Disencrypt",
+                body: `🔓 ${username} disabled encryption`,
+            });
+        }
+        return;
     }
 
-    const cleanContent = content.slice(0, -PLUGIN_SIGNATURE.length);
-    console.log(`[Disencrypt] DM from ${username}: ${cleanContent}`);
-    return;
-  }
+    // Handle encryption request
+    if (content.endsWith(PROTOCOL_REQUEST_SIGNATURE)) {
+        console.log(`[Disencrypt] Received encryption request from ${username}`);
+        const publicKeyMatch = content.match(/-----BEGIN PGP PUBLIC KEY BLOCK-----([\s\S]*?)-----END PGP PUBLIC KEY BLOCK-----/);
+        if (publicKeyMatch && userId) {
+            const publicKey = publicKeyMatch[0];
+            await saveUserKey(userId, publicKey);
 
-  // Try to decrypt encrypted messages
-  if (content.startsWith("-----BEGIN PGP MESSAGE-----")) {
-    console.log(`[Disencrypt] Attempting to decrypt message from ${username}`);
-    const { decryptMessage } = await import('./crypto');
-    const decrypted = await decryptMessage(content);
-    if (decrypted !== content) {
-      console.log(`[Disencrypt] Decrypted message: ${decrypted}`);
+            // Send acceptance message
+            await sendProtocolMessage(msg.channel_id, 'accept');
+
+            showNotification({
+                title: "Disencrypt",
+                body: `🔐 Encryption enabled with ${username}`,
+            });
+        }
+        return;
     }
-  }
+
+    // Handle encryption acceptance
+    if (content.endsWith(PROTOCOL_ACCEPT_SIGNATURE)) {
+        console.log(`[Disencrypt] Received encryption acceptance from ${username}`);
+        const publicKeyMatch = content.match(/-----BEGIN PGP PUBLIC KEY BLOCK-----([\s\S]*?)-----END PGP PUBLIC KEY BLOCK-----/);
+        if (publicKeyMatch && userId) {
+            const publicKey = publicKeyMatch[0];
+            await saveUserKey(userId, publicKey);
+
+            showNotification({
+                title: "Disencrypt",
+                body: `✅ ${username} accepted encryption!`,
+            });
+        }
+        return;
+    }
+
+    // Handle regular plugin detection
+    if (content.endsWith(PLUGIN_SIGNATURE)) {
+        console.log(`[Disencrypt] ${username} is using Disencrypt plugin!`);
+
+        if (userId) {
+            const existingPref = await getUserPreference(userId);
+            if (existingPref === undefined) {
+                console.log(`[Disencrypt] New user ${username}, showing notification`);
+                await showEncryptionDialog(username, userId);
+            }
+        }
+
+        const cleanContent = content.slice(0, -PLUGIN_SIGNATURE.length);
+        console.log(`[Disencrypt] DM from ${username}: ${cleanContent}`);
+        return;
+    }
+
+    // Try to decrypt encrypted messages
+    if (content.startsWith("-----BEGIN PGP MESSAGE-----")) {
+        console.log(`[Disencrypt] Attempting to decrypt message from ${username}`);
+        const { decryptMessage } = await import('./crypto');
+
+        // Pass the message ID to enable DOM replacement
+        const decrypted = await decryptMessage(content, messageId);
+
+        if (decrypted !== content) {
+            console.log(`[Disencrypt] Successfully decrypted message`);
+        }
+    }
 }
