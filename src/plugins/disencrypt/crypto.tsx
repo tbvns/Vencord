@@ -1,18 +1,25 @@
-import { PLUGIN_SIGNATURE, MAX_MESSAGE_LENGTH, PROTOCOL_REQUEST_SIGNATURE, PROTOCOL_ACCEPT_SIGNATURE, PROTOCOL_DISABLE_SIGNATURE } from "./index";
-import { getUserKeys, getMyKeys, saveMyKeys, MyKeys } from "./storage";
+/*
+ * Vencord, a Discord client mod
+ * Copyright (c) 2025 Vendicated and contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 import { ChannelStore } from "@webpack/common";
+
+import { MAX_MESSAGE_LENGTH, PLUGIN_SIGNATURE, PROTOCOL_ACCEPT_SIGNATURE, PROTOCOL_DISABLE_SIGNATURE, PROTOCOL_REQUEST_SIGNATURE } from "./index";
+import { getMyKeys, getUserKeys, MyKeys } from "./storage";
 
 declare const openpgp: any;
 
 async function loadOpenPGP() {
-    if (typeof openpgp !== 'undefined') return;
+    if (typeof openpgp !== "undefined") return;
 
     return new Promise((resolve, reject) => {
-        const script = document.createElement('script');
+        const script = document.createElement("script");
         // Use cdn.jsdelivr.net which is allowed by Discord's CSP
-        script.src = 'https://cdn.jsdelivr.net/npm/openpgp@5.11.0/dist/openpgp.min.js';
+        script.src = "https://cdn.jsdelivr.net/npm/openpgp@5.11.0/dist/openpgp.min.js";
         script.onload = resolve;
-        script.onerror = (e) => {
+        script.onerror = e => {
             console.error("[Disencrypt] Failed to load OpenPGP from CDN:", e);
             reject(new Error("OpenPGP loading failed"));
         };
@@ -25,11 +32,11 @@ export async function generateKeyPair(): Promise<MyKeys> {
         await loadOpenPGP();
 
         const { privateKey, publicKey } = await openpgp.generateKey({
-            type: 'ecc',
-            curve: 'curve25519',
-            userIDs: [{ name: 'Disencrypt User', email: 'user@disencrypt.local' }],
-            passphrase: '',
-            format: 'armored'
+            type: "ecc",
+            curve: "curve25519",
+            userIDs: [{ name: "Disencrypt User", email: "user@disencrypt.local" }],
+            passphrase: "",
+            format: "armored"
         });
 
         return { privateKey, publicKey };
@@ -55,7 +62,7 @@ export async function encryptMessage(message: string, recipientPublicKey: string
         const encrypted = await openpgp.encrypt({
             message: await openpgp.createMessage({ text: message }),
             encryptionKeys: [recipientKey, myPublicKey], // Encrypt for both parties
-            format: 'armored'
+            format: "armored"
         });
 
         console.log("[Disencrypt] Message encrypted for both sender and recipient");
@@ -69,9 +76,9 @@ export async function encryptMessage(message: string, recipientPublicKey: string
 // Helper function to strip all invisible signature characters
 function stripInvisibleChars(text: string): string {
     return text
-        .replace(/\u200B/g, '')
-        .replace(/\u200C/g, '')
-        .replace(/\u200D/g, '');
+        .replace(/\u200B/g, "")
+        .replace(/\u200C/g, "")
+        .replace(/\u200D/g, "");
 }
 
 
@@ -209,26 +216,31 @@ export async function replaceEncryptedMessageInDOM(messageId: string, encryptedC
         console.log("[Disencrypt] Found content container, replacing content...");
 
         // Create wrapper for decrypted content
-        const wrapper = document.createElement('div');
-        wrapper.style.cssText = 'position: relative;';
-        wrapper.className = 'disencrypt-wrapper';
+        const wrapper = document.createElement("div");
+        wrapper.style.cssText = "position: relative;";
+        wrapper.className = "disencrypt-wrapper";
 
         // Create decrypted content element
-        const decryptedDiv = document.createElement('div');
-        decryptedDiv.className = 'disencrypt-decrypted-content';
+        const decryptedDiv = document.createElement("div");
+        decryptedDiv.className = "disencrypt-decrypted-content";
         decryptedDiv.style.cssText = `
             color: #dcddde;
             line-height: 1.375rem;
             white-space: pre-wrap;
             word-wrap: break-word;
+            margin-bottom: 0.5rem;
         `;
         decryptedDiv.textContent = decryptedContent;
 
         // Create encrypted content element (hidden by default)
-        const encryptedDiv = document.createElement('div');
-        encryptedDiv.className = 'disencrypt-encrypted-content';
+        const encryptedDiv = document.createElement("div");
+        encryptedDiv.className = "disencrypt-encrypted-content";
         encryptedDiv.style.cssText = `
             display: none;
+            overflow-y: auto;
+            max-height: 0;
+            opacity: 0;
+            transition: max-height 0.4s ease, opacity 0.4s ease;
             color: #72767d;
             font-family: 'Consolas', 'Courier New', monospace;
             font-size: 12px;
@@ -239,80 +251,64 @@ export async function replaceEncryptedMessageInDOM(messageId: string, encryptedC
             padding: 8px;
             border-radius: 4px;
             margin-top: 4px;
-            max-height: 200px;
-            overflow-y: auto;
         `;
         encryptedDiv.textContent = encryptedContent;
 
         // Create toggle button
-        const toggleBtn = document.createElement('button');
-        toggleBtn.className = 'disencrypt-toggle-btn';
+        const toggleBtn = document.createElement("button");
+        toggleBtn.className = "disencrypt-toggle-btn";
         toggleBtn.style.cssText = `
-            background: transparent;
-            border: none;
-            color: #b9bbbe;
-            cursor: pointer;
-            padding: 2px 4px;
-            margin-left: 8px;
-            font-size: 12px;
-            vertical-align: middle;
-            transition: color 0.2s;
-            display: inline-flex;
             align-items: center;
-            gap: 4px;
-        `;
-        toggleBtn.innerHTML = '🔒 <span style="font-size: 10px;">▼</span>';
-        toggleBtn.title = 'Show encrypted message';
-
-        // Add lock icon and badge
-        const lockBadge = document.createElement('span');
-        lockBadge.style.cssText = `
-            display: inline-block;
-            background: linear-gradient(135deg, #43aa8b, #57f287);
-            color: white;
+            display: inline-flex;
+            background: linear-gradient(135deg, #33777a, #37a267);
+            color: #c9ccce;
+            transition: color 0.2s;
+            cursor: pointer;
             padding: 2px 6px;
             border-radius: 3px;
-            font-size: 10px;
+            font-size: 12px;
             font-weight: 600;
-            margin-left: 8px;
             vertical-align: middle;
         `;
-        lockBadge.textContent = '🔒 ENCRYPTED';
+        toggleBtn.innerHTML = '🔒 Show encrypted content <span style="font-size: 10px;">▼</span>';
 
         let isShowingEncrypted = false;
 
-        toggleBtn.addEventListener('click', (e) => {
+        toggleBtn.addEventListener("click", e => {
             e.preventDefault();
             e.stopPropagation();
             isShowingEncrypted = !isShowingEncrypted;
 
             if (isShowingEncrypted) {
-                encryptedDiv.style.display = 'block';
-                toggleBtn.innerHTML = '🔒 <span style="font-size: 10px;">▲</span>';
-                toggleBtn.title = 'Hide encrypted message';
+                encryptedDiv.style.display = "block";
+                setTimeout(() => {
+                    encryptedDiv.style.opacity = "1";
+                    encryptedDiv.style.maxHeight = "300px";
+                }, 10);
+                toggleBtn.innerHTML = '🔒 Hide encrypted content <span style="font-size: 10px;">▲</span>';
             } else {
-                encryptedDiv.style.display = 'none';
-                toggleBtn.innerHTML = '🔒 <span style="font-size: 10px;">▼</span>';
-                toggleBtn.title = 'Show encrypted message';
+                setTimeout(() => encryptedDiv.style.display = "none", 500);
+                encryptedDiv.style.opacity = "0";
+                encryptedDiv.style.maxHeight = "0";
+                toggleBtn.innerHTML = '🔒 Show encrypted content <span style="font-size: 10px;">▼</span>';
             }
         });
 
-        toggleBtn.addEventListener('mouseenter', () => {
-            toggleBtn.style.color = '#ffffff';
+        toggleBtn.addEventListener("mouseenter", () => {
+            toggleBtn.style.color = "#ffffff";
         });
 
-        toggleBtn.addEventListener('mouseleave', () => {
-            toggleBtn.style.color = '#b9bbbe';
+        toggleBtn.addEventListener("mouseleave", () => {
+            toggleBtn.style.color = "#b9bbbe";
         });
 
         // Build the new content
         wrapper.appendChild(decryptedDiv);
-        wrapper.appendChild(lockBadge);
         wrapper.appendChild(toggleBtn);
         wrapper.appendChild(encryptedDiv);
 
         // Replace the content
-        contentContainer.innerHTML = '';
+        contentContainer.innerHTML = "";
         contentContainer.appendChild(wrapper);
 
         console.log("[Disencrypt] Successfully replaced encrypted message in DOM");
@@ -358,7 +354,7 @@ export async function scanAndDecryptMessages() {
         for (const element of messageElements) {
             try {
                 // Skip if already processed
-                if (element.querySelector('.disencrypt-decrypted-content')) {
+                if (element.querySelector(".disencrypt-decrypted-content")) {
                     continue;
                 }
 
@@ -370,7 +366,7 @@ export async function scanAndDecryptMessages() {
 
                 if (!contentContainer) continue;
 
-                const textContent = contentContainer.textContent || '';
+                const textContent = contentContainer.textContent || "";
 
                 // Check if it's an encrypted message
                 if (textContent.includes("-----BEGIN PGP MESSAGE-----") &&
@@ -379,12 +375,12 @@ export async function scanAndDecryptMessages() {
                     encryptedFound++;
 
                     // Extract message ID from the element
-                    let messageId = element.id?.split('-').pop();
+                    let messageId = element.id?.split("-").pop();
 
                     if (!messageId) {
                         // Try to find it in data attributes
-                        messageId = element.getAttribute('data-list-item-id')?.split('-').pop() ||
-                            element.getAttribute('data-message-id') ||
+                        messageId = element.getAttribute("data-list-item-id")?.split("-").pop() ||
+                            element.getAttribute("data-message-id") ||
                             `temp-${Date.now()}-${Math.random()}`;
                     }
 
@@ -438,7 +434,7 @@ export function startMessageObserver() {
 
     console.log("[Disencrypt] Starting message observer");
 
-    messageObserver = new MutationObserver((mutations) => {
+    messageObserver = new MutationObserver(mutations => {
         let shouldScan = false;
 
         for (const mutation of mutations) {
@@ -446,8 +442,8 @@ export function startMessageObserver() {
                 // Check if any added nodes are message elements
                 for (const node of Array.from(mutation.addedNodes)) {
                     if (node instanceof Element) {
-                        const isMessage = node.id?.startsWith('chat-messages-') ||
-                            node.classList?.toString().includes('message') ||
+                        const isMessage = node.id?.startsWith("chat-messages-") ||
+                            node.classList?.toString().includes("message") ||
                             node.querySelector?.('[class*="messageContent"]');
 
                         if (isMessage) {

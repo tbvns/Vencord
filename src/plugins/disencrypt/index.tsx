@@ -13,7 +13,7 @@ import { ChannelStore, UserStore } from "@webpack/common";
 
 import { handleDisableEncryption, handleRequestEncryption } from "./commands";
 import { processOutgoingMessage } from "./crypto";
-import { initIcons, openIcon, safeIcon, unsafeIcon } from "./icons";
+import { initIcons, openIcon, protocolIcon, safeIcon, unsafeIcon } from "./icons";
 import { handleIncomingMessage } from "./protocol";
 import { initStorage } from "./storage";
 
@@ -55,8 +55,10 @@ export default definePlugin({
     renderMessageDecoration: (props: MessageDecorationProps) => {
         if (!props.channel.isPrivate()) return null;
 
-        if (props.message.content.endsWith(PLUGIN_SIGNATURE)) return openIcon;
-        if (props.message.content.startsWith("-----BEGIN PGP MESSAGE-----")) return safeIcon;
+        const ct = props.message.content;
+        if (ct.endsWith(PLUGIN_SIGNATURE)) return openIcon;
+        if (ct.endsWith(PROTOCOL_ACCEPT_SIGNATURE) || ct.endsWith(PROTOCOL_DISABLE_SIGNATURE) || ct.endsWith(PROTOCOL_REQUEST_SIGNATURE)) return protocolIcon;
+        if (ct.startsWith("-----BEGIN PGP MESSAGE-----")) return safeIcon;
 
         return unsafeIcon;
     },

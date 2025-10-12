@@ -16,137 +16,137 @@ import {
     PROTOCOL_REQUEST_SIGNATURE,
 } from "./index";
 import {
-  disableUserEncryption,
-  getMyKeys,
-  getUserPreference,
-  saveMyKeys,
-  saveUserKey,
+    disableUserEncryption,
+    getMyKeys,
+    getUserPreference,
+    saveMyKeys,
+    saveUserKey,
 } from "./storage";
 import { showEncryptionDialog } from "./ui";
 
 export async function sendProtocolMessage(
-  channelId: string,
-  type: "request" | "accept" | "disable"
+    channelId: string,
+    type: "request" | "accept" | "disable"
 ) {
-  try {
-    // Ensure we have keys
-    let myKeys = await getMyKeys();
-    if (!myKeys && type !== "disable") {
-      console.log("[Disencrypt] Generating new keypair...");
-      myKeys = await generateKeyPair();
-      await saveMyKeys(myKeys);
-    }
+    try {
+        // Ensure we have keys
+        let myKeys = await getMyKeys();
+        if (!myKeys && type !== "disable") {
+            console.log("[Disencrypt] Generating new keypair...");
+            myKeys = await generateKeyPair();
+            await saveMyKeys(myKeys);
+        }
 
-    let signature: string;
-    let protocolMessage: string;
+        let signature: string;
+        let protocolMessage: string;
 
-    if (type === "disable") {
-      signature = PROTOCOL_DISABLE_SIGNATURE;
-      protocolMessage = `----------------
+        if (type === "disable") {
+            signature = PROTOCOL_DISABLE_SIGNATURE;
+            protocolMessage = `----------------
 Disencrypt protocol
 if you see this, enable the disencrypt extension.
 State: Encryption disabled
 ----------------
 Encryption has been disabled for this conversation.${signature}`;
-    } else {
-      const state =
-        type === "request" ? "Requesting encryption" : "Accepting encryption";
-      signature =
-        type === "request"
-          ? PROTOCOL_REQUEST_SIGNATURE
-          : PROTOCOL_ACCEPT_SIGNATURE;
+        } else {
+            const state =
+                type === "request" ? "Requesting encryption" : "Accepting encryption";
+            signature =
+                type === "request"
+                    ? PROTOCOL_REQUEST_SIGNATURE
+                    : PROTOCOL_ACCEPT_SIGNATURE;
 
-      protocolMessage = `----------------
+            protocolMessage = `----------------
 Disencrypt protocol
 if you see this, enable the disencrypt extension.
 State: ${state}
 ----------------
 ${myKeys!.publicKey}${signature}`;
-    }
-
-    console.log("[Disencrypt] Sending protocol message:", {
-      type,
-      channelId,
-      messageLength: protocolMessage.length
-    });
-
-    // Use MessageActions to send the message
-    const MessageActions =
-      Webpack.findByProps?.("sendMessage", "editMessage") ||
-      Webpack.findByProps?.("sendMessage");
-
-    if (!MessageActions?.sendMessage) {
-      throw new Error("MessageActions.sendMessage not available");
-    }
-
-    // Split message if it exceeds Discord's limit
-    const chunks: string[] = [];
-    const limit = 1990;
-    for (let i = 0; i < protocolMessage.length; i += limit) {
-      chunks.push(protocolMessage.slice(i, i + limit));
-    }
-
-    console.log(`[Disencrypt] Sending ${chunks.length} message chunk(s)`);
-
-    // Send each chunk with proper parameters
-    for (let i = 0; i < chunks.length; i++) {
-      const chunk = chunks[i];
-      console.log(`[Disencrypt] Sending chunk ${i + 1}/${chunks.length}`);
-
-      // Create proper message object with all required fields
-      const messageData = {
-        content: chunk,
-        tts: false,
-        invalidEmojis: [],
-        validNonShortcutEmojis: [],
-      };
-
-      // sendMessage typically expects: (channelId, message, extraParams, promiseCallbacks)
-      await new Promise((resolve, reject) => {
-        try {
-          MessageActions.sendMessage(
-            channelId,
-            messageData,
-            undefined, // extraParams
-            {
-              resolve,
-              reject
-            }
-          );
-        } catch (e) {
-          reject(e);
         }
-      });
 
-      // Add small delay between chunks to avoid rate limiting
-      if (i < chunks.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
+        console.log("[Disencrypt] Sending protocol message:", {
+            type,
+            channelId,
+            messageLength: protocolMessage.length
+        });
+
+        // Use MessageActions to send the message
+        const MessageActions =
+            Webpack.findByProps?.("sendMessage", "editMessage") ||
+            Webpack.findByProps?.("sendMessage");
+
+        if (!MessageActions?.sendMessage) {
+            throw new Error("MessageActions.sendMessage not available");
+        }
+
+        // Split message if it exceeds Discord's limit
+        const chunks: string[] = [];
+        const limit = 1990;
+        for (let i = 0; i < protocolMessage.length; i += limit) {
+            chunks.push(protocolMessage.slice(i, i + limit));
+        }
+
+        console.log(`[Disencrypt] Sending ${chunks.length} message chunk(s)`);
+
+        // Send each chunk with proper parameters
+        for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i];
+            console.log(`[Disencrypt] Sending chunk ${i + 1}/${chunks.length}`);
+
+            // Create proper message object with all required fields
+            const messageData = {
+                content: chunk,
+                tts: false,
+                invalidEmojis: [],
+                validNonShortcutEmojis: [],
+            };
+
+            // sendMessage typically expects: (channelId, message, extraParams, promiseCallbacks)
+            await new Promise((resolve, reject) => {
+                try {
+                    MessageActions.sendMessage(
+                        channelId,
+                        messageData,
+                        undefined, // extraParams
+                        {
+                            resolve,
+                            reject
+                        }
+                    );
+                } catch (e) {
+                    reject(e);
+                }
+            });
+
+            // Add small delay between chunks to avoid rate limiting
+            if (i < chunks.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+        }
+
+        console.log("[Disencrypt] Protocol message sent successfully");
+
+        showNotification({
+            title: "Disencrypt",
+            body:
+                type === "disable"
+                    ? "🔓 Encryption disabled for this conversation"
+                    : "🔐 Encryption handshake message sent!",
+        });
+    } catch (err: any) {
+        console.error("[Disencrypt] Failed to send protocol message:", err);
+        console.error("[Disencrypt] Details:", {
+            type,
+            channelId,
+            error: err?.message,
+            stack: err?.stack,
+        });
+
+        showNotification({
+            title: "Disencrypt",
+            body: `❌ Failed to send protocol message: ${err?.message || err}`,
+        });
     }
-
-    console.log("[Disencrypt] Protocol message sent successfully");
-
-    showNotification({
-      title: "Disencrypt",
-      body:
-        type === "disable"
-          ? "🔓 Encryption disabled for this conversation"
-          : "🔐 Encryption handshake message sent!",
-    });
-  } catch (err: any) {
-    console.error("[Disencrypt] Failed to send protocol message:", err);
-    console.error("[Disencrypt] Details:", {
-      type,
-      channelId,
-      error: err?.message,
-      stack: err?.stack,
-    });
-
-    showNotification({
-      title: "Disencrypt",
-      body: `❌ Failed to send protocol message: ${err?.message || err}`,
-    });
-  }
 }
 
 export async function handleIncomingMessage(msg: any) {
@@ -184,7 +184,7 @@ export async function handleIncomingMessage(msg: any) {
                 await saveUserKey(userId, publicKey);
 
                 // Send acceptance message
-                await sendProtocolMessage(msg.channel_id, 'accept');
+                await sendProtocolMessage(msg.channel_id, "accept");
 
                 showNotification({
                     title: "Disencrypt",
@@ -192,7 +192,7 @@ export async function handleIncomingMessage(msg: any) {
                 });
             }
         } else {
-            console.log(`[Disencrypt] Ignoring own encryption request message`);
+            console.log("[Disencrypt] Ignoring own encryption request message");
         }
         return;
     }
@@ -212,7 +212,7 @@ export async function handleIncomingMessage(msg: any) {
                 });
             }
         } else {
-            console.log(`[Disencrypt] Ignoring own encryption acceptance message`);
+            console.log("[Disencrypt] Ignoring own encryption acceptance message");
         }
         return;
     }
@@ -239,13 +239,13 @@ export async function handleIncomingMessage(msg: any) {
     // Try to decrypt encrypted messages (including our own)
     if (content.startsWith("-----BEGIN PGP MESSAGE-----")) {
         console.log(`[Disencrypt] Attempting to decrypt message from ${username}`);
-        const { decryptMessage } = await import('./crypto');
+        const { decryptMessage } = await import("./crypto");
 
         // Pass the message ID to enable DOM replacement
         const decrypted = await decryptMessage(content, messageId);
 
         if (decrypted !== content) {
-            console.log(`[Disencrypt] Successfully decrypted message`);
+            console.log("[Disencrypt] Successfully decrypted message");
         }
     }
 }

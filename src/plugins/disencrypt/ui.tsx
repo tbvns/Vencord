@@ -1,23 +1,30 @@
+/*
+ * Vencord, a Discord client mod
+ * Copyright (c) 2025 Vendicated and contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 import { showNotification } from "@api/Notifications";
 import { ChannelStore } from "@webpack/common";
-import { saveUserPreference } from "./storage";
+
 import { sendProtocolMessage } from "./protocol";
+import { saveUserPreference } from "./storage";
 
 export async function showEncryptionDialog(username: string, userId: string) {
-  showNotification({
-    title: "Disencrypt Detection",
-    body: `${username} is using Disencrypt. Enable encryption?`,
-    permanent: true,
-    noPersist: false,
-    onClick: () => {
-      showEncryptionOptionsDialog(username, userId);
-    },
-  });
+    showNotification({
+        title: "Disencrypt Detection",
+        body: `${username} is using Disencrypt. Enable encryption?`,
+        permanent: true,
+        noPersist: false,
+        onClick: () => {
+            showEncryptionOptionsDialog(username, userId);
+        },
+    });
 }
 
 function showEncryptionOptionsDialog(username: string, userId: string) {
-  const notification = document.createElement("div");
-  notification.style.cssText = `
+    const notification = document.createElement("div");
+    notification.style.cssText = `
     position: fixed;
     top: 50%;
     left: 50%;
@@ -35,7 +42,7 @@ function showEncryptionOptionsDialog(username: string, userId: string) {
     max-width: 400px;
   `;
 
-  notification.innerHTML = `
+    notification.innerHTML = `
     <div style="margin-bottom: 16px;">
       <h3 style="margin: 0 0 12px 0; font-size: 18px; font-weight: 600;">🔒 Disencrypt Detection</h3>
       <p style="margin: 0; color: #b9bbbe; font-size: 14px;">
@@ -50,8 +57,8 @@ function showEncryptionOptionsDialog(username: string, userId: string) {
     </div>
   `;
 
-  const overlay = document.createElement("div");
-  overlay.style.cssText = `
+    const overlay = document.createElement("div");
+    overlay.style.cssText = `
     position: fixed;
     top: 0;
     left: 0;
@@ -61,51 +68,51 @@ function showEncryptionOptionsDialog(username: string, userId: string) {
     z-index: 99999;
   `;
 
-  const closeDialog = () => {
-    if (document.body.contains(overlay)) document.body.removeChild(overlay);
-  };
+    const closeDialog = () => {
+        if (document.body.contains(overlay)) document.body.removeChild(overlay);
+    };
 
-  const yesBtn = notification.querySelector("#disencrypt-yes");
-  const noBtn = notification.querySelector("#disencrypt-no");
-  const neverBtn = notification.querySelector("#disencrypt-never");
+    const yesBtn = notification.querySelector("#disencrypt-yes");
+    const noBtn = notification.querySelector("#disencrypt-no");
+    const neverBtn = notification.querySelector("#disencrypt-never");
 
-  yesBtn?.addEventListener("click", async () => {
-    await saveUserPreference(userId, "yes");
-    
-    const channel = ChannelStore.getChannel(ChannelStore.getDMFromUserId(userId));
-    if (channel) {
-      await sendProtocolMessage(channel.id, 'request');
-    }
-    
-    showNotification({
-      title: "Disencrypt",
-      body: `🔐 Encryption request sent to ${username}`,
+    yesBtn?.addEventListener("click", async () => {
+        await saveUserPreference(userId, "yes");
+
+        const channel = ChannelStore.getChannel(ChannelStore.getDMFromUserId(userId));
+        if (channel) {
+            await sendProtocolMessage(channel.id, "request");
+        }
+
+        showNotification({
+            title: "Disencrypt",
+            body: `🔐 Encryption request sent to ${username}`,
+        });
+        closeDialog();
     });
-    closeDialog();
-  });
 
-  noBtn?.addEventListener("click", async () => {
-    await saveUserPreference(userId, "no");
-    closeDialog();
-  });
-
-  neverBtn?.addEventListener("click", async () => {
-    await saveUserPreference(userId, "never");
-    showNotification({
-      title: "Disencrypt",
-      body: `🚫 Will never ask about ${username} again`,
+    noBtn?.addEventListener("click", async () => {
+        await saveUserPreference(userId, "no");
+        closeDialog();
     });
-    closeDialog();
-  });
 
-  overlay.addEventListener("click", (e) => {
-    if (e.target === overlay) closeDialog();
-  });
+    neverBtn?.addEventListener("click", async () => {
+        await saveUserPreference(userId, "never");
+        showNotification({
+            title: "Disencrypt",
+            body: `🚫 Will never ask about ${username} again`,
+        });
+        closeDialog();
+    });
 
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closeDialog();
-  });
+    overlay.addEventListener("click", e => {
+        if (e.target === overlay) closeDialog();
+    });
 
-  overlay.appendChild(notification);
-  document.body.appendChild(overlay);
+    document.addEventListener("keydown", e => {
+        if (e.key === "Escape") closeDialog();
+    });
+
+    overlay.appendChild(notification);
+    document.body.appendChild(overlay);
 }
