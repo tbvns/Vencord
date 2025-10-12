@@ -9,9 +9,10 @@ import * as Webpack from "@webpack";
 
 import { generateKeyPair } from "./crypto";
 import {
-  PROTOCOL_ACCEPT_SIGNATURE,
-  PROTOCOL_DISABLE_SIGNATURE,
-  PROTOCOL_REQUEST_SIGNATURE,
+    PLUGIN_SIGNATURE,
+    PROTOCOL_ACCEPT_SIGNATURE,
+    PROTOCOL_DISABLE_SIGNATURE,
+    PROTOCOL_REQUEST_SIGNATURE,
 } from "./index";
 import {
   disableUserEncryption,
@@ -90,7 +91,7 @@ ${myKeys!.publicKey}${signature}`;
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i];
       console.log(`[Disencrypt] Sending chunk ${i + 1}/${chunks.length}`);
-      
+
       // Create proper message object with all required fields
       const messageData = {
         content: chunk,
@@ -106,9 +107,9 @@ ${myKeys!.publicKey}${signature}`;
             channelId,
             messageData,
             undefined, // extraParams
-            { 
-              resolve, 
-              reject 
+            {
+              resolve,
+              reject
             }
           );
         } catch (e) {
@@ -172,10 +173,10 @@ export async function handleIncomingMessage(msg: any) {
     if (publicKeyMatch && userId) {
       const publicKey = publicKeyMatch[0];
       await saveUserKey(userId, publicKey);
-      
+
       // Send acceptance message
       await sendProtocolMessage(msg.channel_id, 'accept');
-      
+
       showNotification({
         title: "Disencrypt",
         body: `🔐 Encryption enabled with ${username}`,
@@ -191,9 +192,9 @@ export async function handleIncomingMessage(msg: any) {
     if (publicKeyMatch && userId) {
       const publicKey = publicKeyMatch[0];
       await saveUserKey(userId, publicKey);
-      
+
       showNotification({
-        title: "Disencrypt", 
+        title: "Disencrypt",
         body: `✅ ${username} accepted encryption!`,
       });
     }
