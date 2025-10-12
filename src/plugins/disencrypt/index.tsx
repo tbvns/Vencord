@@ -13,6 +13,7 @@ import { ChannelStore, UserStore } from "@webpack/common";
 
 import { handleDisableEncryption, handleRequestEncryption } from "./commands";
 import { processOutgoingMessage } from "./crypto";
+import { initIcons, openIcon, safeIcon, unsafeIcon } from "./icons";
 import { handleIncomingMessage } from "./protocol";
 import { initStorage } from "./storage";
 
@@ -51,7 +52,17 @@ export default definePlugin({
         },
     ],
 
+    renderMessageDecoration: (props: MessageDecorationProps) => {
+        if (!props.channel.isPrivate()) return null;
+
+        if (props.message.content.endsWith(PLUGIN_SIGNATURE)) return openIcon;
+        if (props.message.content.startsWith("-----BEGIN PGP MESSAGE-----")) return safeIcon;
+
+        return unsafeIcon;
+    },
+
     async start() {
+        initIcons();
         await initStorage();
         console.log("[Disencrypt] started");
 
@@ -79,7 +90,7 @@ export default definePlugin({
             const onChannelSelect = async (payload: any) => {
                 if (payload?.type !== "CHANNEL_SELECT") return;
 
-                const channelId = payload.channelId;
+                const { channelId } = payload;
                 if (!channelId) return;
 
                 const channel = ChannelStore.getChannel(channelId);
@@ -89,7 +100,7 @@ export default definePlugin({
                     console.log("[Disencrypt] DM channel selected, scanning for encrypted messages...");
 
                     // Use the crypto module's scan function
-                    const { debouncedScanAndDecrypt } = await import('./crypto');
+                    const { debouncedScanAndDecrypt } = await import("./crypto");
 
                     // Wait a bit for messages to render
                     setTimeout(() => {
@@ -121,7 +132,7 @@ export default definePlugin({
 
                 if (isDM) {
                     console.log("[Disencrypt] Messages loaded, scanning...");
-                    const { debouncedScanAndDecrypt } = await import('./crypto');
+                    const { debouncedScanAndDecrypt } = await import("./crypto");
                     debouncedScanAndDecrypt(300);
                 }
             };
@@ -143,7 +154,7 @@ export default definePlugin({
                 unsubscribers.push(() => {
                     try {
                         Dispatcher.unregister?.(token);
-                    } catch {}
+                    } catch { }
                 });
             }
 
@@ -151,7 +162,7 @@ export default definePlugin({
                 unsubscribers.forEach(unsub => {
                     try {
                         unsub?.();
-                    } catch {}
+                    } catch { }
                 });
             };
         }
@@ -200,12 +211,12 @@ export default definePlugin({
                 if (MessageActions.sendMessage !== originalSend) {
                     MessageActions.sendMessage = originalSend;
                 }
-            } catch {}
+            } catch { }
         };
 
         // Initial scan when plugin starts
         console.log("[Disencrypt] Performing initial message scan...");
-        const { scanAndDecryptMessages, startMessageObserver } = await import('./crypto');
+        const { scanAndDecryptMessages, startMessageObserver } = await import("./crypto");
         setTimeout(() => {
             scanAndDecryptMessages();
             startMessageObserver();
@@ -225,9 +236,9 @@ export default definePlugin({
         unsubDispatch = undefined;
 
         // Stop the mutation observer
-        import('./crypto').then(({ stopMessageObserver }) => {
+        import("./crypto").then(({ stopMessageObserver }) => {
             stopMessageObserver();
-        }).catch(() => {});
+        }).catch(() => { });
 
         console.log("[Disencrypt] stopped");
     },
