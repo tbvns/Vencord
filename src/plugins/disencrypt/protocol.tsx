@@ -155,59 +155,70 @@ export async function handleIncomingMessage(msg: any) {
     const username = msg.author?.username ?? "Unknown";
     const messageId = msg.id; // Get the message ID
 
-    // Handle disable encryption
+    // Get current user ID
+    const selfId = UserStore.getCurrentUser()?.id;
+    const isOwnMessage = userId === selfId;
+
+    // Handle disable encryption (don't process our own disable messages)
     if (content.endsWith(PROTOCOL_DISABLE_SIGNATURE)) {
-        console.log(`[Disencrypt] Received encryption disable from ${username}`);
-        if (userId) {
-            await disableUserEncryption(userId);
-            showNotification({
-                title: "Disencrypt",
-                body: `🔓 ${username} disabled encryption`,
-            });
+        if (!isOwnMessage) {
+            console.log(`[Disencrypt] Received encryption disable from ${username}`);
+            if (userId) {
+                await disableUserEncryption(userId);
+                showNotification({
+                    title: "Disencrypt",
+                    body: `🔓 ${username} disabled encryption`,
+                });
+            }
         }
         return;
     }
 
-    // Handle encryption request
+    // Handle encryption request (don't process our own requests)
     if (content.endsWith(PROTOCOL_REQUEST_SIGNATURE)) {
-        console.log(`[Disencrypt] Received encryption request from ${username}`);
-        const publicKeyMatch = content.match(/-----BEGIN PGP PUBLIC KEY BLOCK-----([\s\S]*?)-----END PGP PUBLIC KEY BLOCK-----/);
-        if (publicKeyMatch && userId) {
-            const publicKey = publicKeyMatch[0];
-            await saveUserKey(userId, publicKey);
+        if (!isOwnMessage) {
+            console.log(`[Disencrypt] Received encryption request from ${username}`);
+            const publicKeyMatch = content.match(/-----BEGIN PGP PUBLIC KEY BLOCK-----([\s\S]*?)-----END PGP PUBLIC KEY BLOCK-----/);
+            if (publicKeyMatch && userId) {
+                const publicKey = publicKeyMatch[0];
+                await saveUserKey(userId, publicKey);
 
-            // Send acceptance message
-            await sendProtocolMessage(msg.channel_id, 'accept');
+                // Send acceptance message
+                await sendProtocolMessage(msg.channel_id, 'accept');
 
-            showNotification({
-                title: "Disencrypt",
-                body: `🔐 Encryption enabled with ${username}`,
-            });
+                showNotification({
+                    title: "Disencrypt",
+                    body: `🔐 Encryption enabled with ${username}`,
+                });
+            }
+        } else {
+            console.log(`[Disencrypt] Ignoring own encryption request message`);
         }
         return;
     }
 
-    // Handle encryption acceptance
+    // Handle encryption acceptance (don't process our own acceptances)
     if (content.endsWith(PROTOCOL_ACCEPT_SIGNATURE)) {
-        console.log(`[Disencrypt] Received encryption acceptance from ${username}`);
-        const publicKeyMatch = content.match(/-----BEGIN PGP PUBLIC KEY BLOCK-----([\s\S]*?)-----END PGP PUBLIC KEY BLOCK-----/);
-        if (publicKeyMatch && userId) {
-            const publicKey = publicKeyMatch[0];
-            await saveUserKey(userId, publicKey);
+        if (!isOwnMessage) {
+            console.log(`[Disencrypt] Received encryption acceptance from ${username}`);
+            const publicKeyMatch = content.match(/-----BEGIN PGP PUBLIC KEY BLOCK-----([\s\S]*?)-----END PGP PUBLIC KEY BLOCK-----/);
+            if (publicKeyMatch && userId) {
+                const publicKey = publicKeyMatch[0];
+                await saveUserKey(userId, publicKey);
 
-            showNotification({
-                title: "Disencrypt",
-                body: `✅ ${username} accepted encryption!`,
-            });
+                showNotification({
+                    title: "Disencrypt",
+                    body: `✅ ${username} accepted encryption!`,
+                });
+            }
+        } else {
+            console.log(`[Disencrypt] Ignoring own encryption acceptance message`);
         }
         return;
     }
 
-    // Handle regular plugin detection (but don't show dialog for our own messages)
+    // Handle regular plugin detection (don't show dialog for our own messages)
     if (content.endsWith(PLUGIN_SIGNATURE)) {
-        const selfId = UserStore.getCurrentUser()?.id;
-        const isOwnMessage = userId === selfId;
-
         if (!isOwnMessage) {
             console.log(`[Disencrypt] ${username} is using Disencrypt plugin!`);
 
