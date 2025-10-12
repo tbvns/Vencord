@@ -5,10 +5,11 @@
  */
 
 import { showNotification } from "@api/Notifications";
+import { Message } from "@vencord/discord-types";
 import * as Webpack from "@webpack";
 import { UserStore } from "@webpack/common";
 
-import { generateKeyPair } from "./crypto";
+import { decryptAttachments, generateKeyPair } from "./crypto";
 import {
     PLUGIN_SIGNATURE,
     PROTOCOL_ACCEPT_SIGNATURE,
@@ -149,15 +150,12 @@ ${myKeys!.publicKey}${signature}`;
     }
 }
 
-export async function handleIncomingMessage(msg: any) {
+export async function handleIncomingMessage(msg: Message) {
     const content = msg.content ?? "";
     const userId = msg.author?.id;
     const username = msg.author?.username ?? "Unknown";
-    const messageId = msg.id; // Get the message ID
-
-    // Get current user ID
-    const selfId = UserStore.getCurrentUser()?.id;
-    const isOwnMessage = userId === selfId;
+    const messageId = msg.id;
+    const isOwnMessage = userId === UserStore.getCurrentUser()?.id;
 
     // Handle disable encryption (don't process our own disable messages)
     if (content.endsWith(PROTOCOL_DISABLE_SIGNATURE)) {
@@ -216,6 +214,8 @@ export async function handleIncomingMessage(msg: any) {
         }
         return;
     }
+
+    await decryptAttachments(msg.attachments, messageId);
 
     // Handle regular plugin detection (don't show dialog for our own messages)
     if (content.endsWith(PLUGIN_SIGNATURE)) {

@@ -49,13 +49,13 @@ function showNotification(content: string, color1: string, color2: string) {
     }, 4000);
 }
 
-function showSuccessNotification(content: string) {
+export function showSuccessNotification(content: string) {
     console.log(`[Disencrypt] ${content}`);
 
     showNotification(content, "#57f287", "#43aa8b");
 }
 
-function showErrorNotification(content: string) {
+export function showErrorNotification(content: string) {
     console.error(`[Disencrypt] ${content}`);
 
     showNotification(content, "#ed4245", "#c53030");
