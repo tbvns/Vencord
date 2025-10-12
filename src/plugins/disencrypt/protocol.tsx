@@ -6,6 +6,7 @@
 
 import { showNotification } from "@api/Notifications";
 import * as Webpack from "@webpack";
+import { UserStore } from "@webpack/common";
 
 import { generateKeyPair } from "./crypto";
 import {
@@ -202,15 +203,20 @@ export async function handleIncomingMessage(msg: any) {
         return;
     }
 
-    // Handle regular plugin detection
+    // Handle regular plugin detection (but don't show dialog for our own messages)
     if (content.endsWith(PLUGIN_SIGNATURE)) {
-        console.log(`[Disencrypt] ${username} is using Disencrypt plugin!`);
+        const selfId = UserStore.getCurrentUser()?.id;
+        const isOwnMessage = userId === selfId;
 
-        if (userId) {
-            const existingPref = await getUserPreference(userId);
-            if (existingPref === undefined) {
-                console.log(`[Disencrypt] New user ${username}, showing notification`);
-                await showEncryptionDialog(username, userId);
+        if (!isOwnMessage) {
+            console.log(`[Disencrypt] ${username} is using Disencrypt plugin!`);
+
+            if (userId) {
+                const existingPref = await getUserPreference(userId);
+                if (existingPref === undefined) {
+                    console.log(`[Disencrypt] New user ${username}, showing notification`);
+                    await showEncryptionDialog(username, userId);
+                }
             }
         }
 
@@ -219,7 +225,7 @@ export async function handleIncomingMessage(msg: any) {
         return;
     }
 
-    // Try to decrypt encrypted messages
+    // Try to decrypt encrypted messages (including our own)
     if (content.startsWith("-----BEGIN PGP MESSAGE-----")) {
         console.log(`[Disencrypt] Attempting to decrypt message from ${username}`);
         const { decryptMessage } = await import('./crypto');

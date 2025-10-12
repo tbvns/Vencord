@@ -43,13 +43,22 @@ export async function encryptMessage(message: string, recipientPublicKey: string
     try {
         await loadOpenPGP();
 
-        const publicKey = await openpgp.readKey({ armoredKey: recipientPublicKey });
+        const myKeys = await getMyKeys();
+        if (!myKeys) {
+            console.error("[Disencrypt] Cannot encrypt: no keys found");
+            return message;
+        }
+
+        const recipientKey = await openpgp.readKey({ armoredKey: recipientPublicKey });
+        const myPublicKey = await openpgp.readKey({ armoredKey: myKeys.publicKey });
+
         const encrypted = await openpgp.encrypt({
             message: await openpgp.createMessage({ text: message }),
-            encryptionKeys: publicKey,
+            encryptionKeys: [recipientKey, myPublicKey], // Encrypt for both parties
             format: 'armored'
         });
 
+        console.log("[Disencrypt] Message encrypted for both sender and recipient");
         return encrypted;
     } catch (e) {
         console.error("[Disencrypt] Encryption failed:", e);
@@ -60,9 +69,9 @@ export async function encryptMessage(message: string, recipientPublicKey: string
 // Helper function to strip all invisible signature characters
 function stripInvisibleChars(text: string): string {
     return text
-        .replace(/\u200B/g, '') // Zero-width space
-        .replace(/\u200C/g, '') // Zero-width non-joiner
-        .replace(/\u200D/g, ''); // Zero-width joiner
+        .replace(/\u200B/g, '')
+        .replace(/\u200C/g, '')
+        .replace(/\u200D/g, '');
 }
 
 
@@ -70,37 +79,35 @@ export async function decryptMessage(encryptedMessage: string, messageId?: strin
     try {
         await loadOpenPGP();
 
-        // Strip any invisible signature characters
         const cleanedMessage = stripInvisibleChars(encryptedMessage).trim();
 
         const myKeys = await getMyKeys();
-        if (!myKeys) return encryptedMessage;
+        if (!myKeys) {
+            console.warn("[Disencrypt] Cannot decrypt: no keys found");
+            return encryptedMessage;
+        }
 
-        // Read the private key
         const privateKey = await openpgp.readPrivateKey({ armoredKey: myKeys.privateKey });
 
-        // Check if the key is already decrypted (no passphrase)
-        let decryptedKey;
+        let decryptedKey: any;
         if (privateKey.isDecrypted()) {
             decryptedKey = privateKey;
-            console.log("[Disencrypt] Private key is already decrypted");
         } else {
             decryptedKey = await openpgp.decryptKey({
                 privateKey: privateKey,
-                passphrase: ''
+                passphrase: ""
             });
-            console.log("[Disencrypt] Decrypted private key with passphrase");
         }
 
         const message = await openpgp.readMessage({ armoredMessage: cleanedMessage });
+
         const { data: decrypted } = await openpgp.decrypt({
             message,
             decryptionKeys: decryptedKey
         });
 
-        console.log("[Disencrypt] Decryption successful:", decrypted);
+        console.log("[Disencrypt] Decryption successful");
 
-        // If messageId is provided, replace in DOM
         if (messageId) {
             await replaceEncryptedMessageInDOM(messageId, encryptedMessage, decrypted);
         }
@@ -108,6 +115,11 @@ export async function decryptMessage(encryptedMessage: string, messageId?: strin
         return decrypted;
     } catch (e) {
         console.error("[Disencrypt] Decryption failed:", e);
+
+        if (e instanceof Error && e.message.includes("Session key decryption failed")) {
+            console.warn("[Disencrypt] This message was not encrypted for your key");
+        }
+
         return encryptedMessage;
     }
 }
@@ -159,32 +171,47 @@ export async function processOutgoingMessage(content: string, channelId: string)
 
 export async function replaceEncryptedMessageInDOM(messageId: string, encryptedContent: string, decryptedContent: string) {
     try {
-        // Find the message element
-        const messageElement = document.querySelector(`[id^="chat-messages-"][id$="-${messageId}"]`) ||
-            document.querySelector(`#message-content-${messageId}`) ||
+        // Try multiple strategies to find the message element
+        let messageElement = document.querySelector(`#chat-messages-${messageId}`) ||
+            document.querySelector(`[id$="-${messageId}"]`) ||
+            document.querySelector(`[data-list-item-id="chat-messages-${messageId}"]`) ||
             document.querySelector(`[data-message-id="${messageId}"]`);
+
+        // If still not found, search through all messages
+        if (!messageElement) {
+            const allMessages = document.querySelectorAll('[id^="chat-messages-"]');
+            for (const msg of Array.from(allMessages)) {
+                if (msg.id.endsWith(messageId)) {
+                    messageElement = msg;
+                    break;
+                }
+            }
+        }
 
         if (!messageElement) {
             console.warn("[Disencrypt] Could not find message element for ID:", messageId);
             return;
         }
 
+        console.log("[Disencrypt] Found message element:", messageElement.id || messageElement.className);
+
         // Find the content container (the actual text part of the message)
         const contentContainer = messageElement.querySelector('[class*="messageContent"]') ||
             messageElement.querySelector('[class*="markup"]') ||
-            messageElement.querySelector('div[class*="content"]');
+            messageElement.querySelector('[id^="message-content-"]') ||
+            messageElement.querySelector('div[class*="content-"]');
 
         if (!contentContainer) {
             console.warn("[Disencrypt] Could not find content container");
             return;
         }
 
-        // Store original content
-        const originalHTML = contentContainer.innerHTML;
+        console.log("[Disencrypt] Found content container, replacing content...");
 
         // Create wrapper for decrypted content
         const wrapper = document.createElement('div');
         wrapper.style.cssText = 'position: relative;';
+        wrapper.className = 'disencrypt-wrapper';
 
         // Create decrypted content element
         const decryptedDiv = document.createElement('div');
@@ -295,46 +322,89 @@ export async function replaceEncryptedMessageInDOM(messageId: string, encryptedC
     }
 }
 
+// Add this function to scan and decrypt all messages in the current view
 export async function scanAndDecryptMessages() {
     try {
         console.log("[Disencrypt] Scanning for encrypted messages...");
 
-        // Find all message elements in the DOM
-        const messageElements = document.querySelectorAll('[class*="message-"]');
+        // Try multiple selectors to find message elements
+        const possibleSelectors = [
+            '[id^="chat-messages-"]',
+            '[class*="message-"]',
+            'li[id^="chat-messages-"]',
+            '[class*="messageListItem"]',
+            '[data-list-item-id^="chat-messages"]'
+        ];
+
+        let messageElements: Element[] = [];
+
+        for (const selector of possibleSelectors) {
+            const elements = Array.from(document.querySelectorAll(selector));
+            if (elements.length > 0) {
+                messageElements = elements;
+                console.log(`[Disencrypt] Found ${elements.length} messages using selector: ${selector}`);
+                break;
+            }
+        }
+
+        if (messageElements.length === 0) {
+            console.warn("[Disencrypt] No message elements found");
+            return;
+        }
 
         let decryptedCount = 0;
+        let encryptedFound = 0;
 
-        for (const element of Array.from(messageElements)) {
+        for (const element of messageElements) {
             try {
                 // Skip if already processed
                 if (element.querySelector('.disencrypt-decrypted-content')) {
                     continue;
                 }
 
-                // Find the content container
+                // Try multiple selectors for content
                 const contentContainer = element.querySelector('[class*="messageContent"]') ||
-                    element.querySelector('[class*="markup"]');
+                    element.querySelector('[class*="markup"]') ||
+                    element.querySelector('[id^="message-content-"]') ||
+                    element.querySelector('div[class*="content-"]');
 
                 if (!contentContainer) continue;
 
                 const textContent = contentContainer.textContent || '';
 
                 // Check if it's an encrypted message
-                if (textContent.startsWith("-----BEGIN PGP MESSAGE-----") &&
+                if (textContent.includes("-----BEGIN PGP MESSAGE-----") &&
                     textContent.includes("-----END PGP MESSAGE-----")) {
 
+                    encryptedFound++;
+
                     // Extract message ID from the element
-                    const messageId = element.id?.split('-').pop() ||
-                        element.getAttribute('data-message-id') ||
-                        `temp-${Date.now()}-${Math.random()}`;
+                    let messageId = element.id?.split('-').pop();
+
+                    if (!messageId) {
+                        // Try to find it in data attributes
+                        messageId = element.getAttribute('data-list-item-id')?.split('-').pop() ||
+                            element.getAttribute('data-message-id') ||
+                            `temp-${Date.now()}-${Math.random()}`;
+                    }
 
                     console.log(`[Disencrypt] Found encrypted message: ${messageId}`);
+                    console.log(`[Disencrypt] First 100 chars: ${textContent.substring(0, 100)}`);
 
-                    // Decrypt and replace
-                    const decrypted = await decryptMessage(textContent, messageId);
+                    // Extract just the PGP message
+                    const pgpMatch = textContent.match(/(-----BEGIN PGP MESSAGE-----[\s\S]*?-----END PGP MESSAGE-----)/);
+                    if (pgpMatch) {
+                        const encryptedText = pgpMatch[1];
 
-                    if (decrypted !== textContent) {
-                        decryptedCount++;
+                        // Decrypt and replace
+                        const decrypted = await decryptMessage(encryptedText, messageId);
+
+                        if (decrypted !== encryptedText) {
+                            decryptedCount++;
+                            console.log(`[Disencrypt] Successfully decrypted message ${messageId}`);
+                        } else {
+                            console.warn(`[Disencrypt] Failed to decrypt message ${messageId}`);
+                        }
                     }
                 }
             } catch (e) {
@@ -342,15 +412,74 @@ export async function scanAndDecryptMessages() {
             }
         }
 
-        if (decryptedCount > 0) {
-            console.log(`[Disencrypt] Decrypted ${decryptedCount} messages`);
-        }
+        console.log(`[Disencrypt] Scan complete. Found ${encryptedFound} encrypted messages, decrypted ${decryptedCount}`);
 
     } catch (e) {
         console.error("[Disencrypt] Failed to scan messages:", e);
     }
 }
 
+// Add a MutationObserver to catch dynamically loaded messages
+let messageObserver: MutationObserver | null = null;
+
+export function startMessageObserver() {
+    // Stop existing observer if any
+    stopMessageObserver();
+
+    // Find the messages container
+    const messagesContainer = document.querySelector('[class*="messagesWrapper"]') ||
+        document.querySelector('[class*="scroller"][class*="messages"]') ||
+        document.querySelector('[data-list-id="chat-messages"]');
+
+    if (!messagesContainer) {
+        console.warn("[Disencrypt] Could not find messages container for observer");
+        return;
+    }
+
+    console.log("[Disencrypt] Starting message observer");
+
+    messageObserver = new MutationObserver((mutations) => {
+        let shouldScan = false;
+
+        for (const mutation of mutations) {
+            if (mutation.addedNodes.length > 0) {
+                // Check if any added nodes are message elements
+                for (const node of Array.from(mutation.addedNodes)) {
+                    if (node instanceof Element) {
+                        const isMessage = node.id?.startsWith('chat-messages-') ||
+                            node.classList?.toString().includes('message') ||
+                            node.querySelector?.('[class*="messageContent"]');
+
+                        if (isMessage) {
+                            shouldScan = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (shouldScan) break;
+        }
+
+        if (shouldScan) {
+            debouncedScanAndDecrypt(200);
+        }
+    });
+
+    messageObserver.observe(messagesContainer, {
+        childList: true,
+        subtree: true
+    });
+}
+
+export function stopMessageObserver() {
+    if (messageObserver) {
+        messageObserver.disconnect();
+        messageObserver = null;
+        console.log("[Disencrypt] Stopped message observer");
+    }
+}
+
+// Add a debounced version to avoid excessive scanning
 let scanTimeout: NodeJS.Timeout | null = null;
 export function debouncedScanAndDecrypt(delay: number = 500) {
     if (scanTimeout) {

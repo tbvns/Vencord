@@ -37,38 +37,19 @@ export default definePlugin({
             name: "requestEncryption",
             description: "Request encrypted communication with the current DM partner",
             inputType: ApplicationCommandInputType.BUILT_IN,
-            execute: (_, ctx) => handleRequestEncryption(ctx)
+            execute: async (_, ctx) => {
+                await handleRequestEncryption(ctx);
+            },
         },
         {
             name: "disableEncryption",
             description: "Disable encrypted communication with the current DM partner",
             inputType: ApplicationCommandInputType.BUILT_IN,
-            execute: (_, ctx) => handleDisableEncryption(ctx)
+            execute: async (_, ctx) => {
+                await handleDisableEncryption(ctx);
+            },
         },
     ],
-
-    renderMessageDecoration: (props: MessageDecorationProps) => {
-        if (!props.channel.isPrivate()) return null;
-
-        // TODO: change logistic
-        if (!props.message.content.endsWith(PLUGIN_SIGNATURE)) return null;
-
-        return (
-            <div
-                style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "4px",
-                    marginLeft: "6px"
-                }}
-            >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640" width="16" height="16" fill="#25ff00">
-                    <path d="M333.4 66.9C329.2 65 324.7 64 320 64C315.3 64 310.8 65 306.6 66.9L118.3 146.8C96.3 156.1 79.9 177.8 80 204C80.5 303.2 121.3 484.7 293.6 567.2C310.3 575.2 329.7 575.2 346.4 567.2C518.8 484.7 559.6 303.2 560 204C560.1 177.8 543.7 156.1 521.7 146.8L333.4 66.9zM313.6 247.5L320 256L326.4 247.5C337.5 232.7 354.9 224 373.3 224C405.7 224 432 250.3 432 282.7L432 288C432 337.1 366.2 386.1 335.5 406.3C326 412.5 314 412.5 304.6 406.3C273.9 386.1 208.1 337 208.1 288L208.1 282.7C208.1 250.3 234.4 224 266.8 224C285.3 224 302.7 232.7 313.7 247.5z" />
-                </svg>
-                <span style={{ color: "#43b581", fontWeight: 500 }}>Safe</span>
-            </div>
-        );
-    },
 
     async start() {
         await initStorage();
@@ -79,33 +60,100 @@ export default definePlugin({
             Webpack.findByProps?.("dispatch", "register", "wait");
 
         if (Dispatcher) {
+            // Handle new messages
             const onCreate = async (payload: any) => {
                 if (payload?.type !== "MESSAGE_CREATE") return;
                 const msg = payload.message;
                 if (!msg) return;
 
                 const selfId = UserStore.getCurrentUser()?.id;
-                const isNotFromMe = msg.author?.id !== selfId;
                 const channel = ChannelStore.getChannel(msg.channel_id);
                 const isDM = channel?.type === 1 || channel?.type === 3;
 
-                if (isDM && isNotFromMe) {
+                if (isDM) {
                     await handleIncomingMessage(msg);
                 }
             };
 
+            // Handle channel switching
+            const onChannelSelect = async (payload: any) => {
+                if (payload?.type !== "CHANNEL_SELECT") return;
+
+                const channelId = payload.channelId;
+                if (!channelId) return;
+
+                const channel = ChannelStore.getChannel(channelId);
+                const isDM = channel?.type === 1 || channel?.type === 3;
+
+                if (isDM) {
+                    console.log("[Disencrypt] DM channel selected, scanning for encrypted messages...");
+
+                    // Use the crypto module's scan function
+                    const { debouncedScanAndDecrypt } = await import('./crypto');
+
+                    // Wait a bit for messages to render
+                    setTimeout(() => {
+                        debouncedScanAndDecrypt(300);
+                    }, 500);
+                }
+            };
+
+            // Handle message updates (edits, etc)
+            const onMessageUpdate = async (payload: any) => {
+                if (payload?.type !== "MESSAGE_UPDATE") return;
+                const msg = payload.message;
+                if (!msg) return;
+
+                const channel = ChannelStore.getChannel(msg.channel_id);
+                const isDM = channel?.type === 1 || channel?.type === 3;
+
+                if (isDM) {
+                    await handleIncomingMessage(msg);
+                }
+            };
+
+            // Handle load messages (when scrolling up)
+            const onLoadMessages = async (payload: any) => {
+                if (payload?.type !== "LOAD_MESSAGES_SUCCESS") return;
+
+                const channel = ChannelStore.getChannel(payload.channelId);
+                const isDM = channel?.type === 1 || channel?.type === 3;
+
+                if (isDM) {
+                    console.log("[Disencrypt] Messages loaded, scanning...");
+                    const { debouncedScanAndDecrypt } = await import('./crypto');
+                    debouncedScanAndDecrypt(300);
+                }
+            };
+
+            const unsubscribers: Array<(() => void) | undefined> = [];
+
             if (typeof Dispatcher.subscribe === "function") {
-                unsubDispatch = Dispatcher.subscribe("MESSAGE_CREATE", onCreate);
+                unsubscribers.push(Dispatcher.subscribe("MESSAGE_CREATE", onCreate));
+                unsubscribers.push(Dispatcher.subscribe("CHANNEL_SELECT", onChannelSelect));
+                unsubscribers.push(Dispatcher.subscribe("MESSAGE_UPDATE", onMessageUpdate));
+                unsubscribers.push(Dispatcher.subscribe("LOAD_MESSAGES_SUCCESS", onLoadMessages));
             } else if (typeof Dispatcher.register === "function") {
                 const token = Dispatcher.register((payload: any) => {
                     if (payload?.type === "MESSAGE_CREATE") onCreate(payload);
+                    else if (payload?.type === "CHANNEL_SELECT") onChannelSelect(payload);
+                    else if (payload?.type === "MESSAGE_UPDATE") onMessageUpdate(payload);
+                    else if (payload?.type === "LOAD_MESSAGES_SUCCESS") onLoadMessages(payload);
                 });
-                unsubDispatch = () => {
+                unsubscribers.push(() => {
                     try {
                         Dispatcher.unregister?.(token);
-                    } catch { }
-                };
+                    } catch {}
+                });
             }
+
+            unsubDispatch = () => {
+                unsubscribers.forEach(unsub => {
+                    try {
+                        unsub?.();
+                    } catch {}
+                });
+            };
         }
 
         const MessageActions: any =
@@ -152,9 +200,18 @@ export default definePlugin({
                 if (MessageActions.sendMessage !== originalSend) {
                     MessageActions.sendMessage = originalSend;
                 }
-            } catch { }
+            } catch {}
         };
+
+        // Initial scan when plugin starts
+        console.log("[Disencrypt] Performing initial message scan...");
+        const { scanAndDecryptMessages, startMessageObserver } = await import('./crypto');
+        setTimeout(() => {
+            scanAndDecryptMessages();
+            startMessageObserver();
+        }, 2000);
     },
+
 
     stop() {
         try {
@@ -166,6 +223,11 @@ export default definePlugin({
             unsubDispatch?.();
         } catch { }
         unsubDispatch = undefined;
+
+        // Stop the mutation observer
+        import('./crypto').then(({ stopMessageObserver }) => {
+            stopMessageObserver();
+        }).catch(() => {});
 
         console.log("[Disencrypt] stopped");
     },
