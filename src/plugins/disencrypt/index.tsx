@@ -8,7 +8,6 @@ import { ApplicationCommandInputType } from "@api/Commands";
 import { MessageDecorationProps } from "@api/MessageDecorations";
 import { Devs } from "@utils/constants";
 import definePlugin from "@utils/types";
-import { MessageAttachment } from "@vencord/discord-types";
 import * as Webpack from "@webpack";
 import { ChannelStore } from "@webpack/common";
 
@@ -45,61 +44,34 @@ export default definePlugin({
 
     attachmentObserver: null as MutationObserver | null,
 
-    patches: [
-        {
-            find: ".downloadHref",
-            replacement: {
-                match: /(?<=function \i\(\i\)\{)(?=let \i=.+?\.downloadHref)/,
-                replace: "arguments[0]=$self.interceptDownload(arguments[0]);",
-            },
-        },
-    ],
+    dependencies: ["AnonymiseFileNames"],
 
-        globalEncryptedClickHandler(ev: MouseEvent) {
-            if (ev.button !== 0) return;
+    globalEncryptedClickHandler(ev: MouseEvent) {
+        if (ev.button !== 0) return;
 
-            const anchor = getAnchorFromEventPath(ev);
-            if (!anchor) return;
+        const anchor = getAnchorFromEventPath(ev);
+        if (!anchor) return;
 
-            // Check if this is a handled encrypted attachment
-            if (anchor.getAttribute("data-disencrypt-handled") !== "true") return;
+        // Check if this is a handled encrypted attachment
+        if (anchor.getAttribute("data-disencrypt-handled") !== "true") return;
 
-            const url = anchor.getAttribute("data-original-url");
-            const filename = anchor.getAttribute("data-original-filename");
+        const url = anchor.getAttribute("data-original-url");
+        const filename = anchor.getAttribute("data-original-filename");
 
-            if (!url || !filename) return;
+        if (!url || !filename) return;
 
-            console.log("[Disencrypt] Intercepting encrypted download click:", filename);
+        console.log("[Disencrypt] Intercepting encrypted download click:", filename);
 
-            // Stop everything
-            ev.preventDefault();
-            ev.stopPropagation();
-            ev.stopImmediatePropagation();
+        // Stop everything
+        ev.preventDefault();
+        ev.stopPropagation();
+        ev.stopImmediatePropagation();
 
-            // Download and decrypt
-            this.downloadDecrypted(url, filename).catch((e: any) => {
-                console.error("[Disencrypt] Download failed:", e);
-                showErrorNotification(`Failed to download: ${e.message}`);
-            });
-        },
-
-    interceptDownload(attachment: MessageAttachment) {
-        console.log("[Disencrypt] interceptDownload called:", attachment.filename);
-
-        if (!attachment.filename.endsWith("-de")) {
-            console.log("[Disencrypt] Not an encrypted file, skipping");
-            return attachment;
-        }
-
-        console.log("[Disencrypt] Marking encrypted file for interception");
-
-        // Store original URL in a way we can retrieve it
-        return {
-            ...attachment,
-            // Mark this as needing special handling
-            __disencryptEncrypted: true,
-            __disencryptOriginalUrl: attachment.url,
-        };
+        // Download and decrypt
+        this.downloadDecrypted(url, filename).catch((e: any) => {
+            console.error("[Disencrypt] Download failed:", e);
+            showErrorNotification(`Failed to download: ${e.message}`);
+        });
     },
 
     startAttachmentObserver() {
@@ -109,12 +81,12 @@ export default definePlugin({
             // Find download buttons by Discord's class patterns and check their href
             const downloadButtons = document.querySelectorAll('a[href*="cdn.discordapp.com"]');
 
-            downloadButtons.forEach((button) => {
+            downloadButtons.forEach(button => {
                 const anchor = button as HTMLAnchorElement;
                 const href = anchor.getAttribute("href") || "";
 
                 // Check if this is an encrypted file by looking at the href
-                if (href.includes("-de?") || href.endsWith("-de")) {
+                if (href.includes("-de.txt?") || href.endsWith("-de.txt")) {
                     if (anchor.getAttribute("data-disencrypt-handled") === "true") return;
 
                     console.log("[Disencrypt] Sanitizing encrypted download button:", href);
@@ -133,6 +105,16 @@ export default definePlugin({
                     // Store the original URL for download
                     anchor.setAttribute("data-original-url", href);
                     anchor.setAttribute("data-original-filename", filename);
+
+                    const pp = anchor.parentNode?.parentNode;
+                    const cb = () => {
+                        pp?.removeEventListener("click", cb);
+                        this.downloadDecrypted(href, filename).then(() => pp?.addEventListener("click", cb)).catch((e: any) => {
+                            console.error("[Disencrypt] Download failed:", e);
+                            showErrorNotification(`Failed to download: ${e.message}`);
+                        });
+                    };
+                    pp?.addEventListener("click", cb);
                 }
             });
         };
@@ -140,7 +122,7 @@ export default definePlugin({
         // Run immediately on start
         aggressivelySanitize();
 
-        this.attachmentObserver = new MutationObserver((mutations) => {
+        this.attachmentObserver = new MutationObserver(mutations => {
             // Check if any of the mutations added nodes with our download buttons
             let shouldScan = false;
             for (const mutation of mutations) {
@@ -164,11 +146,11 @@ export default definePlugin({
         console.log("[Disencrypt] Aggressive attachment observer started");
     },
 
-        stopAttachmentObserver() {
-            this.attachmentObserver?.disconnect();
-            this.attachmentObserver = null;
-            console.log("[Disencrypt] Attachment observer stopped");
-        },
+    stopAttachmentObserver() {
+        this.attachmentObserver?.disconnect();
+        this.attachmentObserver = null;
+        console.log("[Disencrypt] Attachment observer stopped");
+    },
 
     async downloadDecrypted(url: string, filename: string) {
         try {
@@ -211,12 +193,11 @@ export default definePlugin({
                 console.log("[Disencrypt] Using refreshed URL");
             }
 
-            // **FIX: Use native fetch() with credentials to bypass CORS issues**
             const response = await fetch(effectiveUrl, {
                 method: "GET",
-                credentials: "include",
                 headers: {
                     "Accept": "text/plain,*/*",
+                    "Sec-Fetch-Mode": "no-cors"
                 },
             });
 
@@ -310,25 +291,25 @@ export default definePlugin({
             return outFiles;
         }
         // 2) [{ file }]
-        if (inputArr.every((x) => isFile(x?.file))) {
+        if (inputArr.every(x => isFile(x?.file))) {
             return outFiles.map((f, i) => ({ ...inputArr[i], file: f }));
         }
         // 3) [{ item: { file } }]
-        if (inputArr.every((x) => isFile(x?.item?.file))) {
+        if (inputArr.every(x => isFile(x?.item?.file))) {
             return outFiles.map((f, i) => ({
                 ...inputArr[i],
                 item: { ...(inputArr[i]?.item ?? {}), file: f },
             }));
         }
         // 4) [{ attachment: { file } }]
-        if (inputArr.every((x) => isFile(x?.attachment?.file))) {
+        if (inputArr.every(x => isFile(x?.attachment?.file))) {
             return outFiles.map((f, i) => ({
                 ...inputArr[i],
                 attachment: { ...(inputArr[i]?.attachment ?? {}), file: f },
             }));
         }
         // 5) [{ data: { file } }]
-        if (inputArr.every((x) => isFile(x?.data?.file))) {
+        if (inputArr.every(x => isFile(x?.data?.file))) {
             return outFiles.map((f, i) => ({
                 ...inputArr[i],
                 data: { ...(inputArr[i]?.data ?? {}), file: f },
@@ -337,7 +318,7 @@ export default definePlugin({
         // 6) [{ blob, filename }]
         if (
             inputArr.every(
-                (x) => x?.blob instanceof Blob && typeof x?.filename === "string"
+                x => x?.blob instanceof Blob && typeof x?.filename === "string"
             )
         ) {
             return outFiles.map((f, i) => ({
@@ -370,7 +351,7 @@ export default definePlugin({
             const originalDispatch = Dispatcher.dispatch.bind(Dispatcher);
             const self = this;
 
-            Dispatcher.dispatch = function(payload: any) {
+            Dispatcher.dispatch = function (payload: any) {
                 // Only intercept file upload events
                 if (payload?.type === "UPLOAD_ATTACHMENT_ADD_FILES") {
                     console.log("[Disencrypt] Intercepting file upload...");
@@ -396,7 +377,7 @@ export default definePlugin({
                             const userKeys = await getUserKeys();
                             const recipientKey = userKeys[recipientId];
 
-                            if (!recipientKey?.publicKey || !recipientKey.encryptionEnabled || !window.pako) {
+                            if (!recipientKey?.publicKey || !window.pako) {
                                 return originalDispatch(payload);
                             }
 
@@ -417,7 +398,7 @@ export default definePlugin({
                                     const enc = await encryptMessage(gz, recipientKey.publicKey);
                                     const text = typeof enc === "string" ? enc : new TextDecoder().decode(enc);
 
-                                    const encryptedFile = new File([text], `${file.name}-de`, {
+                                    const encryptedFile = new File([text], file.name.slice(0, file.name.lastIndexOf(".")) + "-de.txt", {
                                         type: "text/plain",
                                         lastModified: Date.now(),
                                     });
@@ -429,7 +410,7 @@ export default definePlugin({
                                         fileItem.file = encryptedFile;
                                         console.log("[Disencrypt] Updated fileItem.file");
                                     }
-                                    if (fileItem.item && typeof fileItem.item === 'object') {
+                                    if (fileItem.item && typeof fileItem.item === "object") {
                                         fileItem.item.file = encryptedFile;
                                         fileItem.item.platform = 1;
                                         console.log("[Disencrypt] Updated fileItem.item.file");
@@ -462,7 +443,7 @@ export default definePlugin({
                 try {
                     Dispatcher.dispatch = originalDispatch;
                     console.log("[Disencrypt] Restored dispatch");
-                } catch {}
+                } catch { }
             };
 
             console.log("[Disencrypt] ✓ Installed");
@@ -516,7 +497,7 @@ export default definePlugin({
         const script = document.createElement("script");
         script.src = "https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js";
         script.onload = () => console.log("[Disencrypt] pako loaded");
-        script.onerror = (e) => console.error("[Disencrypt] Failed to load pako:", e);
+        script.onerror = e => console.error("[Disencrypt] Failed to load pako:", e);
         document.head.appendChild(script);
 
         await initStorage();
@@ -525,8 +506,8 @@ export default definePlugin({
         this.tryPatchUploadAttachmentStore();
 
         // Global capture-phase click interceptor
-        this._boundGlobalClickHandler = this.globalEncryptedClickHandler.bind(this);
-        document.addEventListener("click", this._boundGlobalClickHandler, true);
+        // this._boundGlobalClickHandler = this.globalEncryptedClickHandler.bind(this);
+        // document.addEventListener("click", this._boundGlobalClickHandler, true);
 
         // ALSO intercept mousedown as a safety net
         // document.addEventListener("mousedown", this._boundGlobalClickHandler, true);
@@ -625,15 +606,15 @@ export default definePlugin({
                 unsubscribers.push(() => {
                     try {
                         Dispatcher.unregister?.(token);
-                    } catch {}
+                    } catch { }
                 });
             }
 
             unsubDispatch = () => {
-                unsubscribers.forEach((unsub) => {
+                unsubscribers.forEach(unsub => {
                     try {
                         unsub?.();
-                    } catch {}
+                    } catch { }
                 });
             };
         }
@@ -684,7 +665,7 @@ export default definePlugin({
                 if (MessageActions.sendMessage !== originalSend) {
                     MessageActions.sendMessage = originalSend;
                 }
-            } catch {}
+            } catch { }
         };
 
         // Initial scan when plugin starts
@@ -699,24 +680,24 @@ export default definePlugin({
     stop() {
         try {
             unpatchSend?.();
-        } catch {}
+        } catch { }
         unpatchSend = undefined;
 
         try {
             unpatchAddFiles?.();
-        } catch {}
+        } catch { }
         unpatchAddFiles = undefined;
 
         try {
             unsubDispatch?.();
-        } catch {}
+        } catch { }
         unsubDispatch = undefined;
 
         import("./crypto")
             .then(({ stopMessageObserver }) => {
                 stopMessageObserver();
             })
-            .catch(() => {});
+            .catch(() => { });
 
         // Remove global click interceptor
         try {
@@ -725,7 +706,7 @@ export default definePlugin({
                 document.removeEventListener("mousedown", this._boundGlobalClickHandler, true);
                 document.removeEventListener("auxclick", this._boundGlobalClickHandler, true);
             }
-        } catch {}
+        } catch { }
 
         // Stop observer
         this.stopAttachmentObserver();
@@ -733,13 +714,6 @@ export default definePlugin({
         console.log("[Disencrypt] stopped");
     },
 });
-
-function isEncryptedFilename(name: string | null | undefined) {
-    if (!name) return false;
-    return name.endsWith("-de") || /\.png-de$|\.jpg-de$|\.jpeg-de$|\.gif-de$|\.webp-de$|\.txt-de$|\.pdf-de$|\.zip-de$|\.7z-de$|\.mp4-de$|\.mov-de$/i.test(
-        name
-    );
-}
 
 function getAnchorFromEventPath(ev: Event): HTMLAnchorElement | null {
     const path = (ev as any).composedPath?.() || [];
@@ -772,7 +746,7 @@ function sanitizeEncryptedAnchor(a: HTMLAnchorElement) {
 function getUserTokenSafe(): string | undefined {
     try {
         // Discord stores token JSON under a key ending with "token"
-        const key = Object.keys(localStorage).find((k) => /token$/i.test(k));
+        const key = Object.keys(localStorage).find(k => /token$/i.test(k));
         if (!key) return undefined;
         const raw = localStorage.getItem(key);
         if (!raw) return undefined;
@@ -787,7 +761,7 @@ function getUserTokenSafe(): string | undefined {
             // Sometimes it's plain token
             if (typeof raw === "string" && raw.length > 10) return raw;
         }
-    } catch {}
+    } catch { }
     return undefined;
 }
 
