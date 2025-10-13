@@ -9,7 +9,7 @@ import { Message } from "@vencord/discord-types";
 import * as Webpack from "@webpack";
 import { UserStore } from "@webpack/common";
 
-import { decryptAttachments, generateKeyPair } from "./crypto";
+import { generateKeyPair } from "./crypto";
 import {
     PLUGIN_SIGNATURE,
     PROTOCOL_ACCEPT_SIGNATURE,
@@ -214,8 +214,6 @@ export async function handleIncomingMessage(msg: Message) {
         }
         return;
     }
-
-    await decryptAttachments(msg.attachments, messageId);
 
     // Handle regular plugin detection (don't show dialog for our own messages)
     if (content.endsWith(PLUGIN_SIGNATURE)) {

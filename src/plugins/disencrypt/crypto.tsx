@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { CloudUpload, MessageAttachment } from "@vencord/discord-types";
+import { CloudUpload } from "@vencord/discord-types";
 import { ChannelStore } from "@webpack/common";
 
 import { MAX_MESSAGE_LENGTH, PLUGIN_SIGNATURE, PROTOCOL_ACCEPT_SIGNATURE, PROTOCOL_DISABLE_SIGNATURE, PROTOCOL_REQUEST_SIGNATURE } from "./index";
@@ -12,7 +12,7 @@ import { getMyKeys, getUserKeys, MyKeys } from "./storage";
 
 declare const openpgp: any;
 
-async function loadOpenPGP() {
+export async function loadOpenPGP() {
     if (typeof openpgp !== "undefined") return;
 
     return new Promise((resolve, reject) => {
@@ -133,93 +133,76 @@ export async function decryptMessage(encryptedMessage: string, messageId?: strin
 }
 
 export async function cryptUpload(upload: CloudUpload) {
+    console.log("[Disencrypt] cryptUpload called with:", upload);
+
     const channel = ChannelStore.getChannel(upload.channelId);
-    if (channel?.type !== 1) return;
+    console.log("[Disencrypt] Channel:", channel);
+
+    if (channel?.type !== 1) {
+        console.log("[Disencrypt] Not a DM channel, skipping encryption");
+        return;
+    }
 
     const recipientId = channel.recipients?.[0];
-    if (!recipientId) return;
+    console.log("[Disencrypt] Recipient ID:", recipientId);
+
+    if (!recipientId) {
+        console.log("[Disencrypt] No recipient found");
+        return;
+    }
 
     const userKeys = await getUserKeys();
-    const recipientKey = userKeys[recipientId];
+    console.log("[Disencrypt] User keys:", userKeys);
 
-    if (recipientKey.publicKey) {
+    const recipientKey = userKeys[recipientId];
+    console.log("[Disencrypt] Recipient key:", recipientKey);
+
+    if (!recipientKey?.publicKey) {
+        console.log("[Disencrypt] No public key for recipient, skipping encryption");
+        return;
+    }
+
+    if (!recipientKey.encryptionEnabled) {
+        console.log("[Disencrypt] Encryption not enabled for this user");
+        return;
+    }
+
+    console.log("[Disencrypt] Starting file encryption...");
+
+    try {
         const buffer = await upload.item.file.arrayBuffer();
+        console.log("[Disencrypt] File buffer size:", buffer.byteLength);
+
         const compressed: Uint8Array = window.pako.gzip(buffer);
+        console.log("[Disencrypt] Compressed size:", compressed.length);
 
         const encrypted = await encryptMessage(compressed, recipientKey.publicKey);
+        console.log("[Disencrypt] Encrypted, type:", typeof encrypted);
 
-        const attachment = new File(
-            [encrypted],
-            upload.filename + "-de",
-            { type: "application/octet-stream" }
-        );
+        // Ensure encrypted is a string (armored text)
+        const encryptedText =
+            typeof encrypted === "string"
+                ? encrypted
+                : new TextDecoder().decode(encrypted as Uint8Array);
+
+        console.log("[Disencrypt] Encrypted text length:", encryptedText.length);
+        console.log("[Disencrypt] First 100 chars:", encryptedText.substring(0, 100));
+
+        // Create as text/plain so Discord serves it correctly
+        const attachment = new File([encryptedText], upload.filename + "-de", {
+            type: "text/plain",
+        });
+
+        console.log("[Disencrypt] Created encrypted file:", attachment.name, attachment.size);
 
         upload.filename += "-de";
-        upload.mimeType = "application/octet-stream";
+        upload.mimeType = "text/plain";
         upload.item.file = attachment;
+
+        console.log("[Disencrypt] Upload object updated successfully");
+    } catch (e) {
+        console.error("[Disencrypt] Encryption failed:", e);
     }
-}
-
-export async function decryptAttachments(encryptedAttachments: MessageAttachment[], messageId?: string): Promise<MessageAttachment[]> {
-    console.log(encryptedAttachments);
-
-    await loadOpenPGP();
-    const myKeys = await getMyKeys();
-    if (!myKeys) {
-        console.warn("[Disencrypt] Cannot decrypt: no keys found");
-        return encryptedAttachments;
-    }
-
-    const decryptedAttachments: MessageAttachment[] = [];
-    for (let i = 0; i < encryptedAttachments.length; i++) {
-        const attachment = encryptedAttachments[i];
-        console.log(attachment);
-
-        try {
-            if (!attachment.filename.endsWith("-de")) {
-                decryptedAttachments.push(attachment);
-                continue;
-            }
-
-            const privateKey = await openpgp.readPrivateKey({ armoredKey: myKeys.privateKey });
-
-            let decryptedKey: any;
-            if (privateKey.isDecrypted()) decryptedKey = privateKey;
-            else {
-                decryptedKey = await openpgp.decryptKey({
-                    privateKey: privateKey,
-                    passphrase: ""
-                });
-            }
-
-            const encrypted: Uint8Array = await (await fetch(attachment.proxy_url || attachment.url)).bytes();
-
-            const message = await openpgp.readMessage({ binaryMessage: encrypted });
-
-            const { data: compressed } = await openpgp.decrypt({
-                message,
-                decryptionKeys: decryptedKey
-            });
-
-            console.log("[Disencrypt] Decryption successful");
-            console.log(compressed);
-
-            const decrypted = window.pako.ungzip(compressed);
-            console.log(decrypted);
-
-            // decryptedAttachments.push(decrypted);
-        } catch (e) {
-            console.error("[Disencrypt] Decryption failed:", e);
-
-            if (e instanceof Error && e.message.includes("Session key decryption failed")) {
-                console.warn("[Disencrypt] This message was not encrypted for your key");
-            }
-
-            decryptedAttachments.push(attachment);
-        }
-    }
-
-    return decryptedAttachments;
 }
 
 export async function processOutgoingMessage(content: string, channelId: string): Promise<string | Uint8Array | null> {
