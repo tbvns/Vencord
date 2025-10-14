@@ -42,9 +42,9 @@ export default definePlugin({
     description: "Fully end to end encryption on discord",
     authors: [Devs.tbvns, Devs.dinaru],
 
-    attachmentObserver: null as MutationObserver | null,
-
     dependencies: ["AnonymiseFileNames"],
+
+    attachmentObserver: null as MutationObserver | null,
 
     globalEncryptedClickHandler(ev: MouseEvent) {
         if (ev.button !== 0) return;
@@ -86,7 +86,13 @@ export default definePlugin({
                 const href = anchor.getAttribute("href") || "";
 
                 // Check if this is an encrypted file by looking at the href
-                if (href.includes("-de.txt?") || href.endsWith("-de.txt")) {
+                if (href.includes(".txt?") || href.endsWith(".txt")) {
+                    const pp = anchor.parentNode?.parentNode;
+                    const txtContainer = pp?.querySelector('[class*="textContainer"]');
+                    console.log(txtContainer);
+
+                    if (txtContainer?.innerHTML && !txtContainer.innerHTML.includes("-----BEGIN PGP MESSAGE-----")) return;
+
                     if (anchor.getAttribute("data-disencrypt-handled") === "true") return;
 
                     console.log("[Disencrypt] Sanitizing encrypted download button:", href);
@@ -102,11 +108,10 @@ export default definePlugin({
                     const filenameWithParams = urlParts[urlParts.length - 1];
                     const filename = filenameWithParams.split("?")[0];
 
-                    // Store the original URL for download
+                    /* Store the original URL for download
                     anchor.setAttribute("data-original-url", href);
-                    anchor.setAttribute("data-original-filename", filename);
+                    anchor.setAttribute("data-original-filename", filename); */
 
-                    const pp = anchor.parentNode?.parentNode;
                     const cb = () => {
                         pp?.removeEventListener("click", cb);
                         this.downloadDecrypted(href, filename).then(() => pp?.addEventListener("click", cb)).catch((e: any) => {
@@ -207,6 +212,7 @@ export default definePlugin({
 
             // Read as text
             const encryptedText = await response.text();
+            const ext = encryptedText.includes("%") ? encryptedText.split("%")[1] : ".txt";
 
             if (!encryptedText.includes("-----BEGIN PGP MESSAGE-----")) {
                 console.log("[Disencrypt] Non-armored response head:", encryptedText.slice(0, 160));
@@ -218,7 +224,7 @@ export default definePlugin({
             const decryptedKey =
                 privateKey.isDecrypted() ? privateKey : await openpgp.decryptKey({ privateKey, passphrase: "" });
 
-            const message = await openpgp.readMessage({ armoredMessage: encryptedText });
+            const message = await openpgp.readMessage({ armoredMessage: encryptedText.slice(encryptedText.indexOf("-----BEGIN PGP MESSAGE-----")) });
             const { data: compressed } = await openpgp.decrypt({
                 message,
                 decryptionKeys: decryptedKey,
@@ -229,7 +235,7 @@ export default definePlugin({
             const decrypted: Uint8Array = window.pako.ungzip(compressed);
 
             // Save
-            const originalFilename = filename.endsWith("-de") ? filename.slice(0, -3) : filename;
+            const originalFilename = filename.replace(".txt", "") + ext;
             const blob = new Blob([decrypted]);
             const blobUrl = URL.createObjectURL(blob);
 
@@ -398,7 +404,7 @@ export default definePlugin({
                                     const enc = await encryptMessage(gz, recipientKey.publicKey);
                                     const text = typeof enc === "string" ? enc : new TextDecoder().decode(enc);
 
-                                    const encryptedFile = new File([text], file.name.slice(0, file.name.lastIndexOf(".")) + "-de.txt", {
+                                    const encryptedFile = new File([`%${file.name.slice(file.name.lastIndexOf("."))}%\n` + text], file.name + ".txt", {
                                         type: "text/plain",
                                         lastModified: Date.now(),
                                     });
