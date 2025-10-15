@@ -9,7 +9,7 @@ import { Message } from "@vencord/discord-types";
 import * as Webpack from "@webpack";
 import { UserStore } from "@webpack/common";
 
-import { generateKeyPair } from "../crypto";
+import {generateKeyPair, replaceProtocolMessages} from "../crypto";
 import {
     PLUGIN_SIGNATURE,
     PROTOCOL_ACCEPT_SIGNATURE,
@@ -233,6 +233,9 @@ export async function handleIncomingMessage(msg: Message) {
         console.log(`[Disencrypt] DM from ${username}: ${cleanContent}`);
         return;
     }
+
+
+    replaceProtocolMessages(content, messageId);
 
     // Try to decrypt encrypted messages (including our own)
     if (content.startsWith("-----BEGIN PGP MESSAGE-----")) {

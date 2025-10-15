@@ -5,9 +5,16 @@
  */
 
 import { CloudUpload } from "@vencord/discord-types";
-import { ChannelStore } from "@webpack/common";
+import {ChannelStore, createRoot} from "@webpack/common";
+import { JSX } from "react";
 
-import { MAX_MESSAGE_LENGTH, PLUGIN_SIGNATURE, PROTOCOL_ACCEPT_SIGNATURE, PROTOCOL_DISABLE_SIGNATURE, PROTOCOL_REQUEST_SIGNATURE } from "./index";
+import {
+    MAX_MESSAGE_LENGTH,
+    PLUGIN_SIGNATURE,
+    PROTOCOL_ACCEPT_SIGNATURE,
+    PROTOCOL_DISABLE_SIGNATURE,
+    PROTOCOL_REQUEST_SIGNATURE
+} from "./index";
 import { getMyKeys, getUserKeys, MyKeys } from "./utils/storage";
 
 declare const openpgp: any;
@@ -83,6 +90,48 @@ function stripInvisibleChars(text: string): string {
         .replace(/\u200D/g, "");
 }
 
+export async function replaceProtocolMessages(message: string ,messageId?: string): Promise<void> {
+    if (message.endsWith(PROTOCOL_REQUEST_SIGNATURE)) {
+        await replaceMessageWithHTML(messageId, <>
+            <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 10,
+                background: "#2f3136", border: "2px solid #4f545c", borderRadius: 12, paddingTop: 3, paddingBottom: 3, paddingLeft: 12, paddingRight: 16, color: "#ffffff",
+                fontFamily: 'Whitney, "Helvetica Neue", Helvetica, Arial, sans-serif', fontSize: 14, width: "fit-content", height: "fit-content"
+            }}>
+                <span style={{ color: "#0049ff" }} className="material-symbols-outlined">info</span>
+                <p>
+                    Requesting encryption
+                </p>
+            </div>
+        </>);
+    } else if (message.endsWith(PROTOCOL_ACCEPT_SIGNATURE)) {
+        await replaceMessageWithHTML(messageId, <>
+            <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 10,
+                background: "#2f3136", border: "2px solid #4f545c", borderRadius: 12, paddingTop: 3, paddingBottom: 3, paddingLeft: 12, paddingRight: 16, color: "#ffffff",
+                fontFamily: 'Whitney, "Helvetica Neue", Helvetica, Arial, sans-serif', fontSize: 14, width: "fit-content", height: "fit-content"
+            }}>
+                <span style={{ color: "#26ff1f" }} className="material-symbols-outlined">verified</span>
+                <p>
+                    Accepted encryption request
+                    <br/>
+                    From now on, until disabled, every message will be encrypted
+                </p>
+            </div>
+        </>);
+    } else if (message.endsWith(PROTOCOL_DISABLE_SIGNATURE)) {
+        await replaceMessageWithHTML(messageId, <>
+            <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 10,
+                background: "#2f3136", border: "2px solid #4f545c", borderRadius: 12, paddingTop: 3, paddingBottom: 3, paddingLeft: 12, paddingRight: 16, color: "#ffffff",
+                fontFamily: 'Whitney, "Helvetica Neue", Helvetica, Arial, sans-serif', fontSize: 14, width: "fit-content", height: "fit-content"
+            }}>
+                <span style={{ color: "#ff4646" }} className="material-symbols-outlined">warning</span>
+                <p>
+                    Encryption disabled
+                </p>
+            </div>
+        </>);
+    }
+}
+
 export async function decryptMessage(encryptedMessage: string, messageId?: string): Promise<string> {
     try {
         await loadOpenPGP();
@@ -117,7 +166,7 @@ export async function decryptMessage(encryptedMessage: string, messageId?: strin
         console.log("[Disencrypt] Decryption successful");
 
         if (messageId) {
-            await replaceEncryptedMessageInDOM(messageId, encryptedMessage, decrypted);
+            replaceEncryptedMessageInDOM(messageId, encryptedMessage, decrypted);
         }
 
         return decrypted;
@@ -249,6 +298,109 @@ export async function processOutgoingMessage(content: string, channelId: string)
     }
 }
 
+
+export async function replaceMessageWithHTML(
+    messageId: string | undefined,
+    htmlOrNode: string | HTMLElement | JSX.Element
+) {
+    try {
+        if (!messageId) {
+            console.warn("[replaceMessageWithHTML] No messageId provided");
+            return false;
+        }
+
+        let messageElement: Element | null =
+            document.querySelector(`#chat-messages-${messageId}`) ||
+            document.querySelector(`[id$="-${messageId}"]`) ||
+            document.querySelector(
+                `[data-list-item-id="chat-messages-${messageId}"]`
+            ) ||
+            document.querySelector(`[data-message-id="${messageId}"]`);
+
+        if (!messageElement) {
+            const allMessages = document.querySelectorAll('[id^="chat-messages-"]');
+            for (const msg of Array.from(allMessages)) {
+                if ((msg as HTMLElement).id.endsWith(messageId)) {
+                    messageElement = msg;
+                    break;
+                }
+            }
+        }
+
+        if (!messageElement) {
+            const anyCandidates = document.querySelectorAll("[data-message-id]");
+            for (const el of Array.from(anyCandidates)) {
+                const dm = (el as HTMLElement).getAttribute("data-message-id");
+                if (dm === messageId) {
+                    messageElement = el;
+                    break;
+                }
+            }
+        }
+
+        if (!messageElement) {
+            console.warn(
+                "[replaceMessageWithHTML] Could not find message element for ID:",
+                messageId
+            );
+            return false;
+        }
+
+        let target: Element | null =
+            (messageElement as HTMLElement).querySelector(
+                '[class*="messageContent"]'
+            ) ||
+            (messageElement as HTMLElement).querySelector('[class*="markup"]') ||
+            (messageElement as HTMLElement).querySelector(
+                '[id^="message-content-"]'
+            ) ||
+            (messageElement as HTMLElement).querySelector('div[class*="content-"]');
+
+        if (!target) {
+            const textBlocks = (messageElement as HTMLElement).querySelectorAll(
+                "div, span, p"
+            );
+            let best: Element | null = null;
+            let bestLen = 0;
+            for (const el of Array.from(textBlocks)) {
+                const txt = el.textContent?.trim() ?? "";
+                if (txt.length > bestLen) {
+                    best = el;
+                    bestLen = txt.length;
+                }
+            }
+            target = best || messageElement;
+        }
+
+        if (!target) {
+            console.warn(
+                "[replaceMessageWithHTML] Could not find a target container to replace"
+            );
+            return false;
+        }
+
+        const container = target as HTMLElement;
+        container.innerHTML = "";
+
+        if (typeof htmlOrNode === "string") {
+            const temp = document.createElement("div");
+            temp.innerHTML = htmlOrNode;
+            while (temp.firstChild) {
+                container.appendChild(temp.firstChild);
+            }
+        } else if (htmlOrNode instanceof HTMLElement) {
+            container.appendChild(htmlOrNode);
+        } else {
+            const root = createRoot(container);
+            root.render(htmlOrNode);
+        }
+
+        return true;
+    } catch (err) {
+        console.error("[replaceMessageWithHTML] Failed:", err);
+        return false;
+    }
+}
 
 export async function replaceEncryptedMessageInDOM(messageId: string, encryptedContent: string, decryptedContent: string) {
     try {
@@ -442,14 +594,16 @@ export async function scanAndDecryptMessages() {
 
                 const textContent = contentContainer.textContent || "";
 
+                // Extract message ID from the element
+                let messageId = element.id?.split("-").pop();
+
+                replaceProtocolMessages(textContent, messageId);
+
                 // Check if it's an encrypted message
                 if (textContent.includes("-----BEGIN PGP MESSAGE-----") &&
                     textContent.includes("-----END PGP MESSAGE-----")) {
 
                     encryptedFound++;
-
-                    // Extract message ID from the element
-                    let messageId = element.id?.split("-").pop();
 
                     if (!messageId) {
                         // Try to find it in data attributes
