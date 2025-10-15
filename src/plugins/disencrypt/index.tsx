@@ -11,16 +11,16 @@ import definePlugin from "@utils/types";
 import * as Webpack from "@webpack";
 import { ChannelStore } from "@webpack/common";
 
+import { encryptMessage, loadOpenPGP, processOutgoingMessage } from "./crypto";
+import { initIcons, openIcon, protocolIcon, safeIcon, unsafeIcon } from "./ui/icons";
 import {
     handleDisableEncryption,
     handleRequestEncryption,
     showErrorNotification,
     showSuccessNotification,
-} from "./commands";
-import { encryptMessage, loadOpenPGP, processOutgoingMessage } from "./crypto";
-import { initIcons, openIcon, protocolIcon, safeIcon, unsafeIcon } from "./icons";
-import { handleIncomingMessage } from "./protocol";
-import { getMyKeys, getUserKeys, initStorage } from "./storage";
+} from "./utils/commands";
+import { handleIncomingMessage } from "./utils/protocol";
+import { getMyKeys, getUserKeys, initStorage } from "./utils/storage";
 
 // Signatures
 export const PLUGIN_SIGNATURE = "\u200B\u200C\u200D\u200B\u200C";
@@ -37,6 +37,8 @@ let unpatchSend: (() => void) | undefined;
 let unpatchAddFiles: (() => void) | undefined;
 let unsubDispatch: (() => void) | undefined;
 
+const imgRegex = /\.(jpe?g|png|gif|bmp|webp|svg|tiff?)$/i, vidRegex = /\.(mp4|webm|ogg|mov|avi|mkv|flv|wmv|m4v)$/i, audioRegex = /\.(mp3|wav|ogg|flac|aac|m4a|wma|aiff)$/i;
+
 export default definePlugin({
     name: "Disencrypt",
     description: "Fully end to end encryption on discord",
@@ -46,52 +48,19 @@ export default definePlugin({
 
     attachmentObserver: null as MutationObserver | null,
 
-    globalEncryptedClickHandler(ev: MouseEvent) {
-        if (ev.button !== 0) return;
-
-        const anchor = getAnchorFromEventPath(ev);
-        if (!anchor) return;
-
-        // Check if this is a handled encrypted attachment
-        if (anchor.getAttribute("data-disencrypt-handled") !== "true") return;
-
-        const url = anchor.getAttribute("data-original-url");
-        const filename = anchor.getAttribute("data-original-filename");
-
-        if (!url || !filename) return;
-
-        console.log("[Disencrypt] Intercepting encrypted download click:", filename);
-
-        // Stop everything
-        ev.preventDefault();
-        ev.stopPropagation();
-        ev.stopImmediatePropagation();
-
-        // Download and decrypt
-        this.downloadDecrypted(url, filename).catch((e: any) => {
-            console.error("[Disencrypt] Download failed:", e);
-            showErrorNotification(`Failed to download: ${e.message}`);
-        });
-    },
-
     startAttachmentObserver() {
         if (this.attachmentObserver) this.stopAttachmentObserver();
 
         const aggressivelySanitize = () => {
             // Find download buttons by Discord's class patterns and check their href
-            const downloadButtons = document.querySelectorAll('a[href*="cdn.discordapp.com"]');
-
-            downloadButtons.forEach(button => {
+            document.querySelectorAll('a[href*="cdn.discordapp.com"]').forEach(button => {
                 const anchor = button as HTMLAnchorElement;
                 const href = anchor.getAttribute("href") || "";
 
                 // Check if this is an encrypted file by looking at the href
                 if (href.includes(".txt?") || href.endsWith(".txt")) {
-                    const pp = anchor.parentNode?.parentNode;
-                    const txtContainer = pp?.querySelector('[class*="textContainer"]');
-                    console.log(txtContainer);
-
-                    if (txtContainer?.innerHTML && !txtContainer.innerHTML.includes("-----BEGIN PGP MESSAGE-----")) return;
+                    const pp = anchor.parentNode?.parentElement;
+                    if (!pp || !pp.innerHTML.includes("-----BEGIN PGP MESSAGE-----")) return;
 
                     if (anchor.getAttribute("data-disencrypt-handled") === "true") return;
 
@@ -103,23 +72,29 @@ export default definePlugin({
                     anchor.setAttribute("rel", "noopener noreferrer");
                     anchor.setAttribute("data-disencrypt-handled", "true");
 
-                    // Get the filename from the URL
-                    const urlParts = href.split("/");
-                    const filenameWithParams = urlParts[urlParts.length - 1];
-                    const filename = filenameWithParams.split("?")[0];
+                    // Get the filename from href
+                    const filename = href.slice(href.lastIndexOf("/"), href.indexOf("?"));
 
-                    /* Store the original URL for download
-                    anchor.setAttribute("data-original-url", href);
-                    anchor.setAttribute("data-original-filename", filename); */
-
+                    let autoDl: boolean;
                     const cb = () => {
-                        pp?.removeEventListener("click", cb);
-                        this.downloadDecrypted(href, filename).then(() => pp?.addEventListener("click", cb)).catch((e: any) => {
+                        pp.removeEventListener("dblclick", cb);
+                        pp.removeEventListener("click", cb);
+                        this.downloadDecrypted(pp, href, filename, !autoDl).then(preview => preview ? pp.addEventListener("dblclick", cb) : pp.addEventListener("click", cb)).catch((e: any) => {
                             console.error("[Disencrypt] Download failed:", e);
                             showErrorNotification(`Failed to download: ${e.message}`);
                         });
+
+                        autoDl = false;
                     };
-                    pp?.addEventListener("click", cb);
+
+                    pp.addEventListener("click", cb);
+                    if (pp.innerHTML.includes("%")) {
+                        const ext = pp.innerHTML.split("%")[1];
+                        if (imgRegex.test(ext) || vidRegex.test(ext) || audioRegex.test(ext)) {
+                            autoDl = true;
+                            cb();
+                        }
+                    }
                 }
             });
         };
@@ -137,10 +112,7 @@ export default definePlugin({
                 }
             }
 
-            if (shouldScan) {
-                // Run synchronously - no queueMicrotask delay!
-                aggressivelySanitize();
-            }
+            if (shouldScan) aggressivelySanitize();
         });
 
         this.attachmentObserver.observe(document.body, {
@@ -157,7 +129,7 @@ export default definePlugin({
         console.log("[Disencrypt] Attachment observer stopped");
     },
 
-    async downloadDecrypted(url: string, filename: string) {
+    async downloadDecrypted(pp: HTMLElement, url: string, filename: string, userDl: boolean = false): Promise<void | boolean> {
         try {
             await loadOpenPGP();
             const myKeys = await getMyKeys();
@@ -168,37 +140,17 @@ export default definePlugin({
 
             showSuccessNotification("⏳ Downloading and decrypting...");
 
-            // Resolve full URL if truncated
-            let effectiveUrl = url;
-            if (effectiveUrl.includes("…")) {
-                const anchors = document.querySelectorAll(
-                    'a[href*="cdn.discordapp.com/attachments/"]'
-                );
-                for (const el of Array.from(anchors)) {
-                    const a = el as HTMLAnchorElement;
-                    const href = a.href || a.getAttribute("href") || "";
-                    if (!href || href.includes("…")) continue;
-
-                    const segs = href.split("/");
-                    const attId = segs[segs.length - 2];
-                    if (attId && effectiveUrl.includes(attId)) {
-                        effectiveUrl = href;
-                        break;
-                    }
-                }
-            }
-
-            console.log("[Disencrypt] Downloading from:", effectiveUrl);
+            console.log("[Disencrypt] Downloading from:", url);
 
             // Add before the fetch:
             const HTTP: any = (Webpack as any).findByProps?.("get", "post", "put", "del");
             if (HTTP) {
                 const token = getUserTokenSafe();
-                effectiveUrl = await refreshCdnUrl(HTTP, token, effectiveUrl);
+                url = await refreshCdnUrl(HTTP, token, url);
                 console.log("[Disencrypt] Using refreshed URL");
             }
 
-            const response = await fetch(effectiveUrl, {
+            const response = await fetch(url, {
                 method: "GET",
                 headers: {
                     "Accept": "text/plain,*/*",
@@ -206,9 +158,7 @@ export default definePlugin({
                 },
             });
 
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
+            if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
 
             // Read as text
             const encryptedText = await response.text();
@@ -234,23 +184,33 @@ export default definePlugin({
             if (!window.pako) throw new Error("Pako not loaded");
             const decrypted: Uint8Array = window.pako.ungzip(compressed);
 
-            // Save
-            const originalFilename = filename.replace(".txt", "") + ext;
-            const blob = new Blob([decrypted]);
-            const blobUrl = URL.createObjectURL(blob);
+            const isImage = imgRegex.test(ext);
+            const isVideo = vidRegex.test(ext);
+            const isAudio = audioRegex.test(ext);
 
-            const a = document.createElement("a");
-            a.href = blobUrl;
-            a.download = originalFilename;
-            a.style.display = "none";
-            document.body.appendChild(a);
-            a.click();
-            setTimeout(() => {
-                document.body.removeChild(a);
-                URL.revokeObjectURL(blobUrl);
-            }, 100);
+            const preview = isImage || isAudio || isVideo;
+
+            // Save
+            const blobUrl = URL.createObjectURL(new Blob([decrypted]));
+            if (isImage) pp.innerHTML = `<img src="${blobUrl}" alt="Decrypted Image"></img>`;
+            if (isVideo) pp.innerHTML = `<video controls alt="Decrypted Video"><source src="${blobUrl}" type="video/${ext.slice(1)}">Error</video>`;
+            if (isAudio) pp.innerHTML = `<audio controls alt="Decrypted Audio"><source src="${blobUrl}" type="audio/${ext.slice(1)}">Error</audio>`;
+
+            if (!preview || userDl) {
+                const a = document.createElement("a");
+                a.href = blobUrl;
+                a.download = filename.slice(0, filename.indexOf(".")) + ext;
+                a.style.display = "none";
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => {
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(blobUrl);
+                }, 100);
+            }
 
             showSuccessNotification("✅ File decrypted and downloaded!");
+            return preview;
         } catch (e: any) {
             console.error("[Disencrypt] Failed:", e);
             showErrorNotification(`❌ Failed: ${e.message}`);
@@ -365,27 +325,19 @@ export default definePlugin({
                     const processAsync = async () => {
                         try {
                             const { channelId, files } = payload;
-
-                            if (!files || !Array.isArray(files) || files.length === 0) {
-                                return originalDispatch(payload);
-                            }
-
                             const channel = ChannelStore.getChannel(channelId);
-                            if (!channel || channel.type !== 1) {
+
+                            if (!Array.isArray(files) || files?.length < 1 || channel?.type !== 1 || !window.pako) {
                                 return originalDispatch(payload);
                             }
 
                             const recipientId = channel.recipients?.[0];
-                            if (!recipientId) {
-                                return originalDispatch(payload);
-                            }
+                            if (!recipientId) return originalDispatch(payload);
 
                             const userKeys = await getUserKeys();
                             const recipientKey = userKeys[recipientId];
 
-                            if (!recipientKey?.publicKey || !window.pako) {
-                                return originalDispatch(payload);
-                            }
+                            if (!recipientKey?.publicKey) return originalDispatch(payload);
 
                             console.log("[Disencrypt] Encrypting files...");
 
@@ -399,8 +351,9 @@ export default definePlugin({
                                 console.log(`[Disencrypt] Encrypting: ${file.name} (${file.size} bytes)`);
 
                                 try {
-                                    const buf = await file.arrayBuffer();
-                                    const gz = window.pako.gzip(buf);
+                                    const gz = window.pako.gzip?.(await file.arrayBuffer());
+                                    if (!gz) return originalDispatch(payload);
+
                                     const enc = await encryptMessage(gz, recipientKey.publicKey);
                                     const text = typeof enc === "string" ? enc : new TextDecoder().decode(enc);
 

@@ -9,13 +9,14 @@ import { Message } from "@vencord/discord-types";
 import * as Webpack from "@webpack";
 import { UserStore } from "@webpack/common";
 
-import { generateKeyPair } from "./crypto";
+import { generateKeyPair } from "../crypto";
 import {
     PLUGIN_SIGNATURE,
     PROTOCOL_ACCEPT_SIGNATURE,
     PROTOCOL_DISABLE_SIGNATURE,
     PROTOCOL_REQUEST_SIGNATURE,
-} from "./index";
+} from "../index";
+import { showEncryptionDialog } from "../ui/ui";
 import {
     disableUserEncryption,
     getMyKeys,
@@ -23,7 +24,6 @@ import {
     saveMyKeys,
     saveUserKey,
 } from "./storage";
-import { showEncryptionDialog } from "./ui";
 
 export async function sendProtocolMessage(
     channelId: string,
@@ -237,7 +237,7 @@ export async function handleIncomingMessage(msg: Message) {
     // Try to decrypt encrypted messages (including our own)
     if (content.startsWith("-----BEGIN PGP MESSAGE-----")) {
         console.log(`[Disencrypt] Attempting to decrypt message from ${username}`);
-        const { decryptMessage } = await import("./crypto");
+        const { decryptMessage } = await import("../crypto");
 
         // Pass the message ID to enable DOM replacement
         const decrypted = await decryptMessage(content, messageId);

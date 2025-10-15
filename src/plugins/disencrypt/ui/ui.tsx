@@ -7,8 +7,8 @@
 import { showNotification } from "@api/Notifications";
 import { ChannelStore } from "@webpack/common";
 
-import { sendProtocolMessage } from "./protocol";
-import { saveUserPreference } from "./storage";
+import { sendProtocolMessage } from "../utils/protocol";
+import { saveUserPreference } from "../utils/storage";
 
 export async function showEncryptionDialog(username: string, userId: string) {
     showNotification({

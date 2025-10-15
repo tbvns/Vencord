@@ -8,7 +8,7 @@ import { CloudUpload } from "@vencord/discord-types";
 import { ChannelStore } from "@webpack/common";
 
 import { MAX_MESSAGE_LENGTH, PLUGIN_SIGNATURE, PROTOCOL_ACCEPT_SIGNATURE, PROTOCOL_DISABLE_SIGNATURE, PROTOCOL_REQUEST_SIGNATURE } from "./index";
-import { getMyKeys, getUserKeys, MyKeys } from "./storage";
+import { getMyKeys, getUserKeys, MyKeys } from "./utils/storage";
 
 declare const openpgp: any;
 
